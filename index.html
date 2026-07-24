@@ -319,6 +319,8 @@ function defaultState(){
     potFront: 5,
     potBack: 5,
     potAll: 10,
+    junkAmount: 5,
+    junks: {},
     currentHole: 1,
     gridView: false
   };
@@ -515,6 +517,32 @@ function computePotOfGold(){
   return { ap, N, front, back, all18, buyIn, netByPlayer };
 }
 
+/* ---------- Junk: live closest-to-pin ledger, per hole ---------- */
+function junkTotals(){
+  const totals = {};
+  for(let i=1;i<=5;i++) totals[i]=0;
+  for(const h in state.junks){
+    const jk = state.junks[h];
+    if(!jk || !jk.events) continue;
+    jk.events.forEach(ev=>{
+      const n = ev.winners.length;
+      totals[ev.shooter] = (totals[ev.shooter]||0) - n*state.junkAmount;
+      ev.winners.forEach(w=>{ totals[w] = (totals[w]||0) + state.junkAmount; });
+    });
+  }
+  return totals;
+}
+function junkHoleNet(holeIdx){
+  const jk = state.junks[holeIdx];
+  const totals = {};
+  if(!jk || !jk.events) return totals;
+  jk.events.forEach(ev=>{
+    totals[ev.shooter] = (totals[ev.shooter]||0) - ev.winners.length*state.junkAmount;
+    ev.winners.forEach(w=>{ totals[w] = (totals[w]||0) + state.junkAmount; });
+  });
+  return totals;
+}
+
 /* ============================================================
    RENDER HELPERS
    ============================================================ */
@@ -631,12 +659,13 @@ function renderSetup(){
   const rc = el(`<div class="card"></div>`);
   rc.innerHTML = `
     <div class="section-label">Round</div>
-    <p class="hint">Ready to play again? This clears everyone's hole-by-hole scores but keeps your players, handicaps, course and Best Ball team setup — no need to re-enter anything.</p>
+    <p class="hint">Ready to play again? This clears everyone's hole-by-hole scores and any Junk bets, but keeps your players, handicaps, course and Best Ball team setup — no need to re-enter anything.</p>
     <button class="btn-ghost btn-block" id="newRoundBtn" style="border-color:var(--flag); color:var(--flag);">Start New Round (clear scores)</button>
   `;
   rc.querySelector('#newRoundBtn').onclick = ()=>{
     if(confirm('Clear all scores for a new round? Players, handicaps, course and teams will stay as they are.')){
       state.scores = state.players.map(()=>Array(18).fill(null));
+      state.junks = {};
       state.currentHole = 1;
       scheduleSave();
       renderAll();
@@ -717,6 +746,11 @@ function renderCard(){
     wrap.appendChild(renderGridView(ap));
   } else {
     wrap.appendChild(renderHoleTicket(ap));
+    if(ap.length>=2){
+      const hIdx = state.currentHole-1;
+      const isPar3 = course().par[hIdx] === 3;
+      wrap.appendChild(renderJunkCard(ap, hIdx, isPar3));
+    }
   }
   return wrap;
 }
@@ -800,6 +834,144 @@ function renderGridView(ap){
       scheduleSave();
     };
   });
+  return card;
+}
+
+/* ---------- Junk Bet card (lives on the Card tab, per hole) ---------- */
+function renderJunkCard(ap, hIdx, isPar3){
+  const card = el(`<div class="card"></div>`);
+  const jk = state.junks[hIdx];
+  const h = hIdx + 1;
+
+  if(!jk || !jk.participants || jk.participants.length < 2){
+    const introLabel = isPar3 ? `Junk — Hole ${h} · Par 3` : `Junk — Hole ${h}`;
+    const introHint = isPar3
+      ? `Closest-to-the-pin side bet, not handicapped. Pick 2–5 players for this hole's junk bet.`
+      : `Junk bets aren't automatic here — they only happen if players issue a challenge to each other.`;
+    card.innerHTML = `
+      <div class="section-label">${introLabel}</div>
+      <p class="hint">${introHint}</p>
+      ${isPar3 ? '' : '<button class="btn-ghost btn-block" id="openChallengeBtn">+ Issue a Challenge</button>'}
+      <div id="junkSetupArea" style="${isPar3?'':'display:none; margin-top:10px;'}"></div>
+    `;
+    const setupArea = card.querySelector('#junkSetupArea');
+    setupArea.innerHTML = `
+      <div id="junkPlayerChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
+      <div class="row" style="margin-bottom:10px;">
+        <div><label class="field-label">$ per junk</label><input type="number" id="junkAmt" value="${state.junkAmount}"></div>
+      </div>
+      <button class="btn-primary btn-block" id="startJunkBtn">${isPar3 ? `Start Junk Bet on Hole ${h}` : 'Start Challenge'}</button>
+    `;
+    if(!isPar3){
+      card.querySelector('#openChallengeBtn').onclick = ()=>{
+        setupArea.style.display = 'block';
+        card.querySelector('#openChallengeBtn').style.display = 'none';
+      };
+    }
+    const chipWrap = setupArea.querySelector('#junkPlayerChips');
+    const selected = new Set();
+    ap.forEach(p=>{
+      const chip = document.createElement('button');
+      chip.type='button'; chip.className='btn-ghost btn-small'; chip.textContent = p.name;
+      chip.onclick = ()=>{
+        if(selected.has(p.num)){ selected.delete(p.num); chip.className='btn-ghost btn-small'; }
+        else { if(selected.size>=5){ alert('Max 5 players.'); return; } selected.add(p.num); chip.className='btn-primary btn-small'; }
+      };
+      chipWrap.appendChild(chip);
+    });
+    setupArea.querySelector('#junkAmt').oninput = e=>{ state.junkAmount = Number(e.target.value)||0; scheduleSave(); };
+    setupArea.querySelector('#startJunkBtn').onclick = ()=>{
+      if(selected.size<2){ alert('Pick at least 2 players.'); return; }
+      state.junks[hIdx] = { participants:[...selected], events:[] };
+      scheduleSave(); renderAll();
+    };
+    return card;
+  }
+
+  const participants = jk.participants.map(n=> ({ num:n, name: (state.players[n-1] && state.players[n-1].name) || ('Player '+n) }));
+  card.innerHTML = `
+    <div class="pot-header">
+      <span class="ptitle">${isPar3 ? 'Junk' : 'Challenge'} — Hole ${h}${isPar3?' · Par 3':''}</span>
+      <span class="pot-amount">$${state.junkAmount} / junk</span>
+    </div>
+    <p class="hint">Playing: ${participants.map(p=>p.name).join(', ')} — <button class="link-btn" id="cancelJunkBtn" style="font-size:11px;">cancel bet</button></p>
+    <div class="team-label">Log a shot</div>
+    <label class="field-label">Shooter (whose ball just landed)</label>
+    <select id="junkShooter"></select>
+    <label class="field-label" style="margin-top:10px;">Currently closer to the pin than the shooter (each gets 1 junk)</label>
+    <div id="junkWinnerChips" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px;"></div>
+    <button class="btn-primary btn-block" id="addJunkEventBtn">Add Junk Event</button>
+    <div id="junkEventsList" style="margin-top:12px;"></div>
+    <div id="junkHoleTotals" style="margin-top:10px;"></div>
+  `;
+  const shooterSel = card.querySelector('#junkShooter');
+  participants.forEach(p=>{ const o=document.createElement('option'); o.value=p.num; o.textContent=p.name; shooterSel.appendChild(o); });
+
+  const winnerChipWrap = card.querySelector('#junkWinnerChips');
+  const winnerSel = new Set();
+  function renderWinnerChips(){
+    winnerChipWrap.innerHTML = '';
+    const shooterNum = Number(shooterSel.value);
+    participants.filter(p=>p.num!==shooterNum).forEach(p=>{
+      const chip = document.createElement('button');
+      chip.type='button';
+      chip.className = winnerSel.has(p.num) ? 'btn-primary btn-small' : 'btn-ghost btn-small';
+      chip.textContent = p.name;
+      chip.onclick = ()=>{
+        if(winnerSel.has(p.num)) winnerSel.delete(p.num); else winnerSel.add(p.num);
+        renderWinnerChips();
+      };
+      winnerChipWrap.appendChild(chip);
+    });
+  }
+  shooterSel.onchange = ()=>{ winnerSel.clear(); renderWinnerChips(); };
+  renderWinnerChips();
+
+  card.querySelector('#addJunkEventBtn').onclick = ()=>{
+    const shooterNum = Number(shooterSel.value);
+    if(winnerSel.size===0){ alert('Select at least one player who is currently closer to the pin.'); return; }
+    jk.events.push({ shooter: shooterNum, winners:[...winnerSel] });
+    scheduleSave(); renderAll();
+  };
+
+  card.querySelector('#cancelJunkBtn').onclick = (e)=>{
+    e.preventDefault();
+    if(confirm('Cancel the junk bet on this hole? This clears all logged events for this hole.')){
+      delete state.junks[hIdx];
+      scheduleSave(); renderAll();
+    }
+  };
+
+  const listEl = card.querySelector('#junkEventsList');
+  if(jk.events.length){
+    listEl.innerHTML = `<div class="team-label">Events this hole</div>`;
+    jk.events.forEach((ev,i)=>{
+      const shooterP = participants.find(p=>p.num===ev.shooter);
+      const winnerNames = ev.winners.map(w=> (participants.find(p=>p.num===w)||{}).name).join(', ');
+      const row = document.createElement('div');
+      row.className = 'payout-row';
+      row.innerHTML = `<div class="payout-sub">${shooterP?shooterP.name:'?'} owes 1 junk each to ${winnerNames}</div>`;
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn-ghost btn-small'; delBtn.textContent = '×';
+      delBtn.onclick = ()=>{ jk.events.splice(i,1); scheduleSave(); renderAll(); };
+      row.appendChild(delBtn);
+      listEl.appendChild(row);
+    });
+  }
+
+  const totalsEl = card.querySelector('#junkHoleTotals');
+  const holeTotals = junkHoleNet(hIdx);
+  if(Object.keys(holeTotals).length){
+    totalsEl.innerHTML = `<div class="team-label">Hole subtotal</div>`;
+    participants.forEach(p=>{
+      const v = holeTotals[p.num] || 0;
+      const row = document.createElement('div');
+      row.className = 'payout-row';
+      row.innerHTML = `<div class="payout-name" style="font-size:13px;">${p.name}</div><div class="payout-amt ${v>0?'amt-pos':v<0?'amt-neg':'amt-zero'}" style="font-size:14px;">${fmtMoney(v)}</div>`;
+      totalsEl.appendChild(row);
+    });
+  }
+
   return card;
 }
 
@@ -1019,18 +1191,20 @@ function renderPayout(){
     const mpTotals = matchPlayPlayerTotals();
     const bbTotals = ap.length>=4 ? bestBallPlayerTotals() : {};
     const pog = ap.length>=2 ? computePotOfGold() : null;
+    const jkTotals = junkTotals();
     tc.innerHTML = `<div class="section-label">Net Payout</div>`;
     ap.forEach(p=>{
       const mpU = mpTotals[p.num]||0;
       const bbU = bbTotals[p.num]||0;
       const potD = pog ? (pog.netByPlayer[p.num]||0) : 0;
+      const jkD = jkTotals[p.num]||0;
       const mpD = mpU*state.unitMatch, bbD = bbU*state.unitBB;
-      const totalD = mpD+bbD+potD;
+      const totalD = mpD+bbD+potD+jkD;
       const row = el(`
         <div class="payout-row">
           <div>
             <div class="payout-name">${p.name}</div>
-            <div class="payout-sub">Match ${mpU>0?'+':''}${mpU}u · Best Ball ${bbU>0?'+':''}${bbU}u · Gold ${fmtMoney(potD)}</div>
+            <div class="payout-sub">Match ${mpU>0?'+':''}${mpU}u · Best Ball ${bbU>0?'+':''}${bbU}u · Gold ${fmtMoney(potD)} · Junk ${fmtMoney(jkD)}</div>
           </div>
           <div class="payout-amt ${totalD>0?'amt-pos':totalD<0?'amt-neg':'amt-zero'}">${fmtMoney(totalD)}</div>
         </div>`);
