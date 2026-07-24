@@ -1076,9 +1076,10 @@ function renderMatch(){
       ${nineCardHtml(m.back,'BACK NINE')}
       ${straightCardHtml(m.all18,'ALL 18 · STRAIGHT, NO PRESS')}
       <div class="match-total">
-        <span>${m.pA.name.split(' ')[0]} net</span>
+        <span>Combined — 3 separate bets</span>
         <span class="${m.total>0?'amt-pos':m.total<0?'amt-neg':'amt-zero'}">${m.total>0?'+':''}${m.total} unit${Math.abs(m.total)===1?'':'s'}</span>
       </div>
+      <div class="divider-note" style="margin-top:2px;">Front ${m.front.units>0?'+':''}${m.front.units} · Back ${m.back.units>0?'+':''}${m.back.units} · All 18 ${m.all18.result>0?'+':''}${m.all18.result} — each settles on its own; they aren't the same bet</div>
     `;
     wrap.appendChild(card);
   });
@@ -1269,7 +1270,7 @@ function renderPayout(){
         <div class="payout-row">
           <div>
             <div class="payout-name">${p.name}</div>
-            <div class="payout-sub">Match ${mpU>0?'+':''}${mpU}u · Best Ball ${bbU>0?'+':''}${bbU}u · Gold ${fmtMoney(potD)} · Junk ${fmtMoney(jkD)}</div>
+            <div class="payout-sub">Nassau ${mpU>0?'+':''}${mpU}u (F+B+18) · Best Ball ${bbU>0?'+':''}${bbU}u · Gold ${fmtMoney(potD)} · Junk ${fmtMoney(jkD)}</div>
           </div>
           <div class="payout-amt ${totalD>0?'amt-pos':totalD<0?'amt-neg':'amt-zero'}">${fmtMoney(totalD)}</div>
         </div>`);
