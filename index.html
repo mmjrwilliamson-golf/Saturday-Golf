@@ -315,6 +315,7 @@ function defaultState(){
     scores: [ Array(18).fill(null), Array(18).fill(null), Array(18).fill(null), Array(18).fill(null), Array(18).fill(null) ],
     rounds: [ {a:[1,2],b:[3,4]}, {a:[1,3],b:[2,4]}, {a:[1,4],b:[2,3]} ],
     boxRounds: [ {box:[1,2]}, {box:[3,4]}, {box:[5,1]} ],
+    bestBallFormat: '5',
     unitMatch: 5,
     unitBB: 5,
     potFront: 5,
@@ -528,11 +529,14 @@ function bestBallBoxRound(roundIdx){
   const matches = pairs.map(pair => ({ opponents: pair, match: computeBestBallMatch(box, pair, holeIdxs) }));
   return { box, field, matches, holeStart };
 }
+function useBoxFormat(){
+  return activePlayers().length===5 && state.bestBallFormat!=='4';
+}
 function bestBallPlayerTotals(){
   const totals = {};
   for(let i=1;i<=5;i++) totals[i]=0;
   const ap = activePlayers();
-  if(ap.length===5){
+  if(useBoxFormat()){
     for(let r=0;r<3;r++){
       const { box, matches } = bestBallBoxRound(r);
       matches.forEach(({opponents, match})=>{
@@ -1134,7 +1138,8 @@ function renderMatch(){
 function renderBestBall(){
   const wrap = el(`<div></div>`);
   const ap = activePlayers();
-  const introText = ap.length===5
+  const boxMode = useBoxFormat();
+  const introText = boxMode
     ? `3 six-hole rounds. Two players are "in the box" each round and play three separate matches — one against each possible pairing of the other three players. Lowest handicap in the field is zeroed; everyone else plays off that. Best ball ties are broken by the second (partner's) ball. Every hole won outright automatically adds a brand-new bet to that match.`
     : `3 six-hole rounds, a new partner each time. Lowest handicap in the field is zeroed; everyone else plays off that. Best ball ties on the low score are broken by the second (partner's) ball. Every hole that's won outright — not tied — automatically adds a brand-new bet for the rest of that round, so a 6-hole match can carry up to 6 bets total.`;
   const intro = el(`<div class="card"><div class="section-label">Game 2 · Better Ball Round Robin</div><p class="hint">${introText}</p></div>`);
@@ -1146,6 +1151,21 @@ function renderBestBall(){
   }
 
   if(ap.length===5){
+    const toggleCard = el(`<div class="card"></div>`);
+    toggleCard.innerHTML = `
+      <div class="section-label">Format</div>
+      <div class="viewtoggle" style="margin-bottom:0;">
+        <button class="${!boxMode?'btn-primary':'btn-ghost'}" id="bb4Btn">4 Players</button>
+        <button class="${boxMode?'btn-primary':'btn-ghost'}" id="bb5Btn">5 Players · Box</button>
+      </div>
+      <p class="hint" style="margin-top:8px;">${boxMode ? 'All 5 play every round — two in the box facing three matches against the field.' : 'Pick which 4 of the 5 play each round below (the 5th sits that round out).'}</p>
+    `;
+    toggleCard.querySelector('#bb4Btn').onclick = ()=>{ state.bestBallFormat='4'; scheduleSave(); renderAll(); };
+    toggleCard.querySelector('#bb5Btn').onclick = ()=>{ state.bestBallFormat='5'; scheduleSave(); renderAll(); };
+    wrap.appendChild(toggleCard);
+  }
+
+  if(boxMode){
     renderBestBallBox(wrap, ap);
   } else {
     renderBestBallStandard(wrap, ap);
