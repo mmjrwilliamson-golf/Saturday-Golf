@@ -255,6 +255,26 @@ nav.tabbar button.active .tlabel{color:var(--fairway);}
 .save-tag.show{opacity:1;}
 
 .divider-note{font-size:11.5px; color:var(--ink-soft); text-align:center; margin:10px 0;}
+
+/* ---------- Pot of Gold ---------- */
+.pot-header{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;}
+.pot-header .ptitle{font-family:'Fraunces',serif; font-weight:600; font-size:16px;}
+.pot-amount{font-family:'IBM Plex Mono',monospace; font-size:13px; color:var(--brass); font-weight:600;}
+.pending-badge{
+  font-family:'IBM Plex Mono',monospace; font-size:10px; font-weight:700; letter-spacing:0.5px;
+  background:var(--paper-2); color:var(--ink-soft); padding:3px 8px; border-radius:999px;
+}
+.lb-row{display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line);}
+.lb-row:last-child{border-bottom:none;}
+.lb-row.winner{background:var(--brass-light); margin:0 -16px; padding:8px 16px; border-radius:8px; border-bottom:none;}
+.lb-rank{width:20px; font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--ink-soft); text-align:center;}
+.lb-name{flex:1; font-weight:600; font-size:14px;}
+.lb-score{font-family:'IBM Plex Mono',monospace; font-size:15px; font-weight:600;}
+.lb-share{font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--turf); font-weight:600;}
+.buyin-strip{display:flex; gap:8px; margin-top:6px;}
+.buyin-strip > div{flex:1; text-align:center; background:var(--paper-2); border-radius:9px; padding:8px 4px;}
+.buyin-strip .blabel{font-family:'IBM Plex Mono',monospace; font-size:9.5px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.5px;}
+.buyin-strip input{text-align:center; padding:6px 4px; font-size:14px; margin-top:3px;}
 </style>
 </head>
 <body>
@@ -296,6 +316,9 @@ function defaultState(){
     rounds: [ {a:[1,2],b:[3,4]}, {a:[1,3],b:[2,4]}, {a:[1,4],b:[2,3]} ],
     unitMatch: 5,
     unitBB: 5,
+    potFront: 5,
+    potBack: 5,
+    potAll: 10,
     currentHole: 1,
     gridView: false
   };
@@ -451,6 +474,47 @@ function matchPlayPlayerTotals(){
   return totals;
 }
 
+/* ---------- Pot of Gold: low net front / low net back / low net 18, full handicap ---------- */
+function netTotalFor(p, holeIdxs){
+  const si = course().si;
+  const hcp = Number(p.hcp)||0;
+  let sum = 0;
+  for(const h of holeIdxs){
+    const g = state.scores[p.idx][h];
+    if(g==null) return null; // incomplete
+    sum += g - strokesFor(hcp, si[h]);
+  }
+  return sum;
+}
+function potSegment(ap, holeIdxs, potTotal){
+  const entries = ap.map(p=>({p, net: netTotalFor(p, holeIdxs)}));
+  const complete = entries.every(e=>e.net!==null);
+  let winners = [];
+  if(complete && entries.length){
+    const min = Math.min(...entries.map(e=>e.net));
+    winners = entries.filter(e=>e.net===min).map(e=>e.p.num);
+  }
+  const share = (complete && winners.length) ? potTotal/winners.length : 0;
+  return { entries, complete, winners, potTotal, share };
+}
+function computePotOfGold(){
+  const ap = activePlayers();
+  const N = ap.length;
+  const front = potSegment(ap, [0,1,2,3,4,5,6,7,8], state.potFront*N);
+  const back  = potSegment(ap, [9,10,11,12,13,14,15,16,17], state.potBack*N);
+  const all18 = potSegment(ap, [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17], state.potAll*N);
+  const buyIn = state.potFront + state.potBack + state.potAll;
+  const netByPlayer = {};
+  ap.forEach(p=>{
+    let net = 0;
+    if(front.complete) net += (front.winners.includes(p.num)? front.share:0) - state.potFront;
+    if(back.complete)  net += (back.winners.includes(p.num)? back.share:0) - state.potBack;
+    if(all18.complete) net += (all18.winners.includes(p.num)? all18.share:0) - state.potAll;
+    netByPlayer[p.num] = net;
+  });
+  return { ap, N, front, back, all18, buyIn, netByPlayer };
+}
+
 /* ============================================================
    RENDER HELPERS
    ============================================================ */
@@ -483,6 +547,7 @@ const TABS = [
   {id:'card', label:'CARD', icon:`<rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke-width="2"/><path d="M7 10h4M7 14h7" stroke-width="2"/>`},
   {id:'match', label:'MATCH PLAY', icon:`<circle cx="8" cy="12" r="4" fill="none" stroke-width="2"/><circle cx="16" cy="12" r="4" fill="none" stroke-width="2"/>`},
   {id:'bb', label:'BEST BALL', icon:`<circle cx="12" cy="9" r="4" fill="none" stroke-width="2"/><path d="M5 21c0-3 3-5 7-5s7 2 7 5" fill="none" stroke-width="2"/>`},
+  {id:'gold', label:'GOLD', icon:`<path d="M5 9h14l-1.4 8.6a2 2 0 01-2 1.4H8.4a2 2 0 01-2-1.4L5 9z" fill="none" stroke-width="2"/><path d="M8 9V7a4 4 0 018 0v2" fill="none" stroke-width="2"/><circle cx="12" cy="13" r="1.6" fill="currentColor" stroke="none"/>`},
   {id:'pay', label:'PAYOUT', icon:`<path d="M3 8h18M3 8v10a2 2 0 002 2h14a2 2 0 002-2V8M3 8l2-4h14l2 4" fill="none" stroke-width="2"/>`},
 ];
 
@@ -510,6 +575,7 @@ function renderAll(){
   if(activeTab==='card') main.appendChild(renderCard());
   if(activeTab==='match') main.appendChild(renderMatch());
   if(activeTab==='bb') main.appendChild(renderBestBall());
+  if(activeTab==='gold') main.appendChild(renderPotOfGold());
   if(activeTab==='pay') main.appendChild(renderPayout());
 }
 
@@ -846,6 +912,80 @@ function renderBestBall(){
 }
 
 /* ---------- PAYOUT TAB ---------- */
+/* ---------- POT OF GOLD TAB ---------- */
+function renderPotOfGold(){
+  const wrap = el(`<div></div>`);
+  const ap = activePlayers();
+
+  const intro = el(`<div class="card"></div>`);
+  intro.innerHTML = `
+    <div class="section-label">Pot of Gold</div>
+    <p class="hint">Every player buys in. Low net score wins each pot — front nine, back nine, and all 18. Net uses each player's own full handicap.</p>
+    <div class="buyin-strip">
+      <div><div class="blabel">Front $</div><input type="number" id="potFront" value="${state.potFront}"></div>
+      <div><div class="blabel">Back $</div><input type="number" id="potBack" value="${state.potBack}"></div>
+      <div><div class="blabel">All 18 $</div><input type="number" id="potAll" value="${state.potAll}"></div>
+    </div>
+    <p class="hint" style="margin-top:8px;">Buy-in per player: <b>$${state.potFront+state.potBack+state.potAll}</b> (that's ${ap.length} player${ap.length===1?'':'s'} → a $${(state.potFront+state.potBack+state.potAll)*ap.length} pot total).</p>
+  `;
+  intro.querySelector('#potFront').oninput = e=>{ state.potFront = Number(e.target.value)||0; scheduleSave(); renderAll(); };
+  intro.querySelector('#potBack').oninput  = e=>{ state.potBack  = Number(e.target.value)||0; scheduleSave(); renderAll(); };
+  intro.querySelector('#potAll').oninput   = e=>{ state.potAll   = Number(e.target.value)||0; scheduleSave(); renderAll(); };
+  wrap.appendChild(intro);
+
+  if(ap.length<2){
+    wrap.appendChild(el(`<div class="card empty-state">Add at least 2 players on Setup to run the Pot of Gold.</div>`));
+    return wrap;
+  }
+
+  const pog = computePotOfGold();
+
+  function leaderboardCard(title, seg){
+    const card = el(`<div class="card"></div>`);
+    const sorted = [...seg.entries].sort((a,b)=>{
+      if(a.net===null) return 1;
+      if(b.net===null) return -1;
+      return a.net-b.net;
+    });
+    const rowsHtml = sorted.map(e=>{
+      const isWinner = seg.complete && seg.winners.includes(e.p.num);
+      return `
+        <div class="lb-row ${isWinner?'winner':''}">
+          <div class="lb-rank">${isWinner?'🏆':''}</div>
+          <div class="lb-name">${e.p.name}</div>
+          ${isWinner?`<div class="lb-share">+$${seg.share.toFixed(seg.share%1===0?0:2)}</div>`:''}
+          <div class="lb-score">${e.net===null?'—':e.net}</div>
+        </div>`;
+    }).join('');
+    card.innerHTML = `
+      <div class="pot-header">
+        <span class="ptitle">${title}</span>
+        <span class="pot-amount">$${seg.potTotal} pot</span>
+      </div>
+      ${!seg.complete?`<div class="pending-badge">IN PROGRESS — shown so far</div>`:''}
+      <div style="margin-top:8px;">${rowsHtml}</div>
+    `;
+    return card;
+  }
+
+  wrap.appendChild(leaderboardCard('Front Nine — Low Net', pog.front));
+  wrap.appendChild(leaderboardCard('Back Nine — Low Net', pog.back));
+  wrap.appendChild(leaderboardCard('All 18 — Low Net', pog.all18));
+
+  const tcard = el(`<div class="card"><div class="section-label">Pot of Gold — Net $</div></div>`);
+  ap.forEach(p=>{
+    const net = pog.netByPlayer[p.num] || 0;
+    const row = el(`<div class="payout-row">
+      <div><div class="payout-name">${p.name}</div></div>
+      <div class="payout-amt ${net>0?'amt-pos':net<0?'amt-neg':'amt-zero'}">${fmtMoney(net)}</div>
+    </div>`);
+    tcard.appendChild(row);
+  });
+  wrap.appendChild(tcard);
+
+  return wrap;
+}
+
 function renderPayout(){
   const wrap = el(`<div></div>`);
   const ap = activePlayers();
@@ -878,17 +1018,19 @@ function renderPayout(){
     if(!ap.length){ tc.innerHTML = `<div class="empty-state">Add players on Setup to see payouts.</div>`; return; }
     const mpTotals = matchPlayPlayerTotals();
     const bbTotals = ap.length>=4 ? bestBallPlayerTotals() : {};
+    const pog = ap.length>=2 ? computePotOfGold() : null;
     tc.innerHTML = `<div class="section-label">Net Payout</div>`;
     ap.forEach(p=>{
       const mpU = mpTotals[p.num]||0;
       const bbU = bbTotals[p.num]||0;
+      const potD = pog ? (pog.netByPlayer[p.num]||0) : 0;
       const mpD = mpU*state.unitMatch, bbD = bbU*state.unitBB;
-      const totalD = mpD+bbD;
+      const totalD = mpD+bbD+potD;
       const row = el(`
         <div class="payout-row">
           <div>
             <div class="payout-name">${p.name}</div>
-            <div class="payout-sub">Match ${mpU>0?'+':''}${mpU}u · Best Ball ${bbU>0?'+':''}${bbU}u</div>
+            <div class="payout-sub">Match ${mpU>0?'+':''}${mpU}u · Best Ball ${bbU>0?'+':''}${bbU}u · Gold ${fmtMoney(potD)}</div>
           </div>
           <div class="payout-amt ${totalD>0?'amt-pos':totalD<0?'amt-neg':'amt-zero'}">${fmtMoney(totalD)}</div>
         </div>`);
