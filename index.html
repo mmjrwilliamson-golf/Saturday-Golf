@@ -314,6 +314,7 @@ function defaultState(){
     ],
     scores: [ Array(18).fill(null), Array(18).fill(null), Array(18).fill(null), Array(18).fill(null), Array(18).fill(null) ],
     rounds: [ {a:[1,2],b:[3,4]}, {a:[1,3],b:[2,4]}, {a:[1,4],b:[2,3]} ],
+    boxRounds: [ {box:[1,2]}, {box:[3,4]}, {box:[5,1]} ],
     unitMatch: 5,
     unitBB: 5,
     potFront: 5,
@@ -321,6 +322,7 @@ function defaultState(){
     potAll: 10,
     junkAmount: 5,
     junks: {},
+    potParticipants: null,
     currentHole: 1,
     gridView: false
   };
@@ -452,14 +454,11 @@ function fieldLowHcp(){
   if(!ap.length) return 0;
   return Math.min(...ap.map(p=>Number(p.hcp)||0));
 }
-function bestBallRound(roundIdx){
-  const rd = state.rounds[roundIdx];
-  const holeStart = roundIdx*6;
-  const holeIdxs = [0,1,2,3,4,5].map(k=>holeStart+k);
+function computeBestBallMatch(teamANums, teamBNums, holeIdxs){
   const low = fieldLowHcp();
   const byNum = n => state.players[n-1] ? {...state.players[n-1], idx:n-1} : null;
-  const teamA = [byNum(rd.a[0]), byNum(rd.a[1])];
-  const teamB = [byNum(rd.b[0]), byNum(rd.b[1])];
+  const teamA = teamANums.map(byNum);
+  const teamB = teamBNums.map(byNum);
   const netFor = (p,h)=>{
     if(!p || !p.name) return null;
     const gross = state.scores[p.idx][h];
@@ -503,17 +502,53 @@ function bestBallRound(roundIdx){
   const numPresses = streams.length - 1;
   const units = streams.reduce((a,s)=>a+s.result, 0);
   return { teamA, teamB, results, streams, origResult, numPresses, units, holesPlayed, total:n,
-            liveCum: lastIdx>=0 ? (streams[0].cumHistory[lastIdx] ?? 0) : 0, pressActive: numPresses>0, holeStart };
+            liveCum: lastIdx>=0 ? (streams[0].cumHistory[lastIdx] ?? 0) : 0, pressActive: numPresses>0 };
+}
+function bestBallRound(roundIdx){
+  const rd = state.rounds[roundIdx];
+  const holeStart = roundIdx*6;
+  const holeIdxs = [0,1,2,3,4,5].map(k=>holeStart+k);
+  const m = computeBestBallMatch(rd.a, rd.b, holeIdxs);
+  return { ...m, holeStart };
+}
+/* ---------- 5-player "box" format: two players in the box play three matches
+   each 6-hole round, one against each pairing of the other three players. ---------- */
+function boxFieldFor(roundIdx){
+  const box = (state.boxRounds[roundIdx] && state.boxRounds[roundIdx].box) || [1,2];
+  const ap = activePlayers().map(p=>p.num);
+  const field = ap.filter(n=>!box.includes(n));
+  return { box, field };
+}
+function bestBallBoxRound(roundIdx){
+  const holeStart = roundIdx*6;
+  const holeIdxs = [0,1,2,3,4,5].map(k=>holeStart+k);
+  const { box, field } = boxFieldFor(roundIdx);
+  const pairs = [];
+  for(let i=0;i<field.length;i++) for(let j=i+1;j<field.length;j++) pairs.push([field[i],field[j]]);
+  const matches = pairs.map(pair => ({ opponents: pair, match: computeBestBallMatch(box, pair, holeIdxs) }));
+  return { box, field, matches, holeStart };
 }
 function bestBallPlayerTotals(){
   const totals = {};
   for(let i=1;i<=5;i++) totals[i]=0;
-  for(let r=0;r<3;r++){
-    const res = bestBallRound(r);
-    const rd = state.rounds[r];
-    const half = res.units/2;
-    [rd.a[0],rd.a[1]].forEach(n=>{ if(n) totals[n]+=half; });
-    [rd.b[0],rd.b[1]].forEach(n=>{ if(n) totals[n]-=half; });
+  const ap = activePlayers();
+  if(ap.length===5){
+    for(let r=0;r<3;r++){
+      const { box, matches } = bestBallBoxRound(r);
+      matches.forEach(({opponents, match})=>{
+        const half = match.units/2;
+        box.forEach(n=>{ totals[n]+=half; });
+        opponents.forEach(n=>{ totals[n]-=half; });
+      });
+    }
+  } else {
+    for(let r=0;r<3;r++){
+      const res = bestBallRound(r);
+      const rd = state.rounds[r];
+      const half = res.units/2;
+      [rd.a[0],rd.a[1]].forEach(n=>{ if(n) totals[n]+=half; });
+      [rd.b[0],rd.b[1]].forEach(n=>{ if(n) totals[n]-=half; });
+    }
   }
   return totals;
 }
@@ -550,8 +585,17 @@ function potSegment(ap, holeIdxs, potTotal){
   const share = (complete && winners.length) ? potTotal/winners.length : 0;
   return { entries, complete, winners, potTotal, share };
 }
-function computePotOfGold(){
+function potParticipantsResolved(){
   const ap = activePlayers();
+  if(Array.isArray(state.potParticipants)){
+    const set = new Set(state.potParticipants);
+    const filtered = ap.filter(p=>set.has(p.num));
+    if(filtered.length) return filtered;
+  }
+  return ap; // default: everyone playing today is in the pot
+}
+function computePotOfGold(){
+  const ap = potParticipantsResolved();
   const N = ap.length;
   const front = potSegment(ap, [0,1,2,3,4,5,6,7,8], state.potFront*N);
   const back  = potSegment(ap, [9,10,11,12,13,14,15,16,17], state.potBack*N);
@@ -1090,7 +1134,10 @@ function renderMatch(){
 function renderBestBall(){
   const wrap = el(`<div></div>`);
   const ap = activePlayers();
-  const intro = el(`<div class="card"><div class="section-label">Game 2 · Better Ball Round Robin</div><p class="hint">3 six-hole rounds, a new partner each time. Lowest handicap in the field is zeroed; everyone else plays off that. Best ball ties on the low score are broken by the second (partner's) ball. Every hole that's won outright — not tied — automatically adds a brand-new bet for the rest of that round, so a 6-hole match can carry up to 6 bets total.</p></div>`);
+  const introText = ap.length===5
+    ? `3 six-hole rounds. Two players are "in the box" each round and play three separate matches — one against each possible pairing of the other three players. Lowest handicap in the field is zeroed; everyone else plays off that. Best ball ties are broken by the second (partner's) ball. Every hole won outright automatically adds a brand-new bet to that match.`
+    : `3 six-hole rounds, a new partner each time. Lowest handicap in the field is zeroed; everyone else plays off that. Best ball ties on the low score are broken by the second (partner's) ball. Every hole that's won outright — not tied — automatically adds a brand-new bet for the rest of that round, so a 6-hole match can carry up to 6 bets total.`;
+  const intro = el(`<div class="card"><div class="section-label">Game 2 · Better Ball Round Robin</div><p class="hint">${introText}</p></div>`);
   wrap.appendChild(intro);
 
   if(ap.length<4){
@@ -1098,6 +1145,27 @@ function renderBestBall(){
     return wrap;
   }
 
+  if(ap.length===5){
+    renderBestBallBox(wrap, ap);
+  } else {
+    renderBestBallStandard(wrap, ap);
+  }
+
+  const totals = bestBallPlayerTotals();
+  const tcard = el(`<div class="card"><div class="section-label">Player Totals — Best Ball</div></div>`);
+  ap.forEach(p=>{
+    const u = totals[p.num] || 0;
+    const row = el(`<div class="payout-row">
+      <div><div class="payout-name">${p.name}</div></div>
+      <div class="payout-amt ${u>0?'amt-pos':u<0?'amt-neg':'amt-zero'}">${u>0?'+':''}${u} u</div>
+    </div>`);
+    tcard.appendChild(row);
+  });
+  wrap.appendChild(tcard);
+  return wrap;
+}
+
+function renderBestBallStandard(wrap, ap){
   for(let r=0;r<3;r++){
     const rd = state.rounds[r];
     const card = el(`<div class="card"></div>`);
@@ -1134,19 +1202,51 @@ function renderBestBall(){
     card.appendChild(resultBlock);
     wrap.appendChild(card);
   }
+}
 
-  const totals = bestBallPlayerTotals();
-  const tcard = el(`<div class="card"><div class="section-label">Player Totals — Best Ball</div></div>`);
-  ap.forEach(p=>{
-    const u = totals[p.num] || 0;
-    const row = el(`<div class="payout-row">
-      <div><div class="payout-name">${p.name}</div></div>
-      <div class="payout-amt ${u>0?'amt-pos':u<0?'amt-neg':'amt-zero'}">${u>0?'+':''}${u} u</div>
-    </div>`);
-    tcard.appendChild(row);
-  });
-  wrap.appendChild(tcard);
-  return wrap;
+function renderBestBallBox(wrap, ap){
+  const nameOf = n => n? ((state.players[n-1] && state.players[n-1].name) || ('Player '+n)) : '?';
+  for(let r=0;r<3;r++){
+    const card = el(`<div class="card"></div>`);
+    const holeStart = r*6+1;
+    card.innerHTML = `<div class="section-label">Round ${r+1} · Holes ${holeStart}–${holeStart+5}</div>`;
+
+    const boxRow = el(`<div><div class="team-label">In the box</div><div class="team-slot-row"></div></div>`);
+    const slotRow = boxRow.querySelector('.team-slot-row');
+    const bx = state.boxRounds[r].box;
+    [0,1].forEach(slot=>{
+      const s = document.createElement('select');
+      s.innerHTML = ap.map(p=>`<option value="${p.num}">${p.name}</option>`).join('');
+      s.value = bx[slot];
+      s.onchange = ()=>{
+        const v = Number(s.value);
+        if(v === bx[1-slot]){ alert('Both box spots need different players.'); s.value = bx[slot]; return; }
+        bx[slot] = v; scheduleSave(); renderAll();
+      };
+      slotRow.appendChild(s);
+    });
+    card.appendChild(boxRow);
+
+    const { box, field, matches } = bestBallBoxRound(r);
+    const fieldNote = el(`<p class="hint" style="margin-top:8px;">${nameOf(box[0])} &amp; ${nameOf(box[1])} play the field (${field.map(nameOf).join(', ')}) — one match against each pairing.</p>`);
+    card.appendChild(fieldNote);
+
+    matches.forEach(({opponents, match})=>{
+      const flag = match.numPresses>0 ? `<span class="press-flag">${FLAG_SVG} ${match.numPresses} BET${match.numPresses===1?'':'S'} ADDED</span>` : '';
+      const block = el(`
+        <div class="nine-block">
+          <div class="nine-head"><span class="label">vs ${nameOf(opponents[0])} &amp; ${nameOf(opponents[1])}</span>${flag}</div>
+          ${holeBar(match.results)}
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="status-pill ${pillClass(match.liveCum)}">${match.holesPlayed? pillText(match.liveCum,'UP','DN') : 'NOT STARTED'}</span>
+            <span class="nine-units">${match.holesPlayed? (match.units>0?'+':'')+match.units+' unit'+(Math.abs(match.units)===1?'':'s') : '—'}</span>
+          </div>
+        </div>`);
+      card.appendChild(block);
+    });
+
+    wrap.appendChild(card);
+  }
 }
 
 /* ---------- PAYOUT TAB ---------- */
@@ -1158,21 +1258,53 @@ function renderPotOfGold(){
   const intro = el(`<div class="card"></div>`);
   intro.innerHTML = `
     <div class="section-label">Pot of Gold</div>
-    <p class="hint">Every player buys in. Low net score wins each pot — front nine, back nine, and all 18. Net uses each player's own full handicap.</p>
+    <p class="hint">Pick who's buying in below — not everyone playing today has to be in the pot. Low net score wins each pot — front nine, back nine, and all 18. Net uses each player's own full handicap.</p>
+    <label class="field-label">Buying in</label>
+    <div id="potPlayerChips" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 12px;"></div>
     <div class="buyin-strip">
       <div><div class="blabel">Front $</div><input type="number" id="potFront" value="${state.potFront}"></div>
       <div><div class="blabel">Back $</div><input type="number" id="potBack" value="${state.potBack}"></div>
       <div><div class="blabel">All 18 $</div><input type="number" id="potAll" value="${state.potAll}"></div>
     </div>
-    <p class="hint" style="margin-top:8px;">Buy-in per player: <b>$${state.potFront+state.potBack+state.potAll}</b> (that's ${ap.length} player${ap.length===1?'':'s'} → a $${(state.potFront+state.potBack+state.potAll)*ap.length} pot total).</p>
+    <p class="hint" style="margin-top:8px;" id="potBuyInSummary"></p>
   `;
   intro.querySelector('#potFront').oninput = e=>{ state.potFront = Number(e.target.value)||0; scheduleSave(); renderAll(); };
   intro.querySelector('#potBack').oninput  = e=>{ state.potBack  = Number(e.target.value)||0; scheduleSave(); renderAll(); };
   intro.querySelector('#potAll').oninput   = e=>{ state.potAll   = Number(e.target.value)||0; scheduleSave(); renderAll(); };
+
+  const chipWrap = intro.querySelector('#potPlayerChips');
+  const currentParticipants = potParticipantsResolved().map(p=>p.num);
+  ap.forEach(p=>{
+    const inPot = currentParticipants.includes(p.num);
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = inPot ? 'btn-primary btn-small' : 'btn-ghost btn-small';
+    chip.textContent = p.name;
+    chip.onclick = ()=>{
+      const nowSelected = new Set(potParticipantsResolved().map(x=>x.num));
+      if(nowSelected.has(p.num)){
+        if(nowSelected.size<=2){ alert('At least 2 players are needed in the pot.'); return; }
+        nowSelected.delete(p.num);
+      } else {
+        nowSelected.add(p.num);
+      }
+      state.potParticipants = ap.map(x=>x.num).filter(n=>nowSelected.has(n));
+      scheduleSave(); renderAll();
+    };
+    chipWrap.appendChild(chip);
+  });
+  const summaryEl = intro.querySelector('#potBuyInSummary');
+  const nIn = currentParticipants.length;
+  const totalBuyIn = state.potFront+state.potBack+state.potAll;
+  summaryEl.innerHTML = `Buy-in per player: <b>$${totalBuyIn}</b> (${nIn} player${nIn===1?'':'s'} in the pot → a $${totalBuyIn*nIn} pot total).`;
   wrap.appendChild(intro);
 
   if(ap.length<2){
     wrap.appendChild(el(`<div class="card empty-state">Add at least 2 players on Setup to run the Pot of Gold.</div>`));
+    return wrap;
+  }
+  if(currentParticipants.length<2){
+    wrap.appendChild(el(`<div class="card empty-state">Pick at least 2 players above to run the Pot of Gold.</div>`));
     return wrap;
   }
 
@@ -1211,7 +1343,7 @@ function renderPotOfGold(){
   wrap.appendChild(leaderboardCard('All 18 — Low Net', pog.all18));
 
   const tcard = el(`<div class="card"><div class="section-label">Pot of Gold — Net $</div></div>`);
-  ap.forEach(p=>{
+  pog.ap.forEach(p=>{
     const net = pog.netByPlayer[p.num] || 0;
     const row = el(`<div class="payout-row">
       <div><div class="payout-name">${p.name}</div></div>
