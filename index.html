@@ -368,6 +368,11 @@ function activePlayers(){
   return state.players.map((p,i)=>({...p, idx:i, num:i+1})).filter(p=>p.name && p.name.trim()!=="");
 }
 function course(){ return state.courses[state.courseIdx] || {par:DEFAULT_PAR, si:DEFAULT_SI, name:"—"}; }
+function lastPlayedIdx(results){
+  let last = -1;
+  for(let i=0;i<results.length;i++){ if(results[i]!==null) last = i; }
+  return last;
+}
 
 function computeNine(scoresA, scoresB, diff, lowIsA, holeIdxs){
   const si = course().si;
@@ -400,12 +405,13 @@ function computeNine(scoresA, scoresB, diff, lowIsA, holeIdxs){
     }
   }
   const sign = x=> x>0?1:x<0?-1:0;
-  streams.forEach(s=>{ s.finalCum = (s.cumHistory[holesPlayed-1] ?? 0); s.result = sign(s.finalCum); });
+  const lastIdx = lastPlayedIdx(results);
+  streams.forEach(s=>{ s.finalCum = (lastIdx>=0 ? (s.cumHistory[lastIdx] ?? 0) : 0); s.result = sign(s.finalCum); });
   const origResult = streams[0].result;
   const numPresses = streams.length - 1;
   const units = streams.reduce((a,s)=>a+s.result, 0);
   return { results, streams, origResult, numPresses, units, holesPlayed, total:n,
-           liveCum: streams[0].cumHistory[holesPlayed-1] ?? 0, pressActive: numPresses>0 };
+           liveCum: lastIdx>=0 ? (streams[0].cumHistory[lastIdx] ?? 0) : 0, pressActive: numPresses>0 };
 }
 function computeStraight(scoresA, scoresB, diff, lowIsA, holeIdxs){
   const si = course().si;
@@ -422,7 +428,8 @@ function computeStraight(scoresA, scoresB, diff, lowIsA, holeIdxs){
   let running = 0; const cum = results.map(r=> running += (r||0));
   const holesPlayed = results.filter(r=>r!==null).length;
   const sign = x=> x>0?1:x<0?-1:0;
-  const finalCum = cum[holesPlayed-1] ?? 0;
+  const lastIdx = lastPlayedIdx(results);
+  const finalCum = lastIdx>=0 ? (cum[lastIdx] ?? 0) : 0;
   return { results, cum, result: sign(finalCum), holesPlayed, total: holeIdxs.length, liveCum: finalCum };
 }
 function computeMatch(pA, pB){
@@ -465,23 +472,38 @@ function bestBallRound(roundIdx){
     const avals = [a1,a2].filter(v=>v!=null), bvals=[b1,b2].filter(v=>v!=null);
     if(!avals.length || !bvals.length) return null;
     const aBest = Math.min(...avals), bBest = Math.min(...bvals);
-    if(aBest<bBest) return 1; if(aBest>bBest) return -1; return 0;
+    if(aBest<bBest) return 1;
+    if(aBest>bBest) return -1;
+    // Low ball tied -> the second ball on each team breaks the tie (only when both teams have two scores in).
+    if(avals.length===2 && bvals.length===2){
+      const aSecond = Math.max(...avals), bSecond = Math.max(...bvals);
+      if(aSecond<bSecond) return 1;
+      if(aSecond>bSecond) return -1;
+    }
+    return 0;
   });
-  let running=0; const cumOrig = results.map(r=>running+=(r||0));
-  let pressPos=null;
-  for(let i=0;i<cumOrig.length;i++){ if(Math.abs(cumOrig[i])===1){ pressPos=i+1; break; } }
-  const cumPress=[];
-  if(pressPos!==null && pressPos<holeIdxs.length){
-    let r2=0;
-    for(let i=0;i<results.length;i++){ if(i>=pressPos){ r2+=(results[i]||0); cumPress.push(r2);} else cumPress.push(null); }
-  } else { for(let i=0;i<results.length;i++) cumPress.push(null); }
+  const n = holeIdxs.length;
+  // Any decisively-won hole (not tied) automatically starts a brand-new bet running to the
+  // end of the round — independent of who's up or down. Up to 5 extra bets + the original = 6 max.
+  const streams = [{ start:0, cum:0, cumHistory:[] }];
+  for(let h=0; h<n; h++){
+    const r = results[h];
+    for(const s of streams){
+      if(h >= s.start){ s.cum += (r||0); s.cumHistory[h] = s.cum; }
+    }
+    if(r!==null && r!==0 && h+1<n){
+      streams.push({ start:h+1, cum:0, cumHistory:[] });
+    }
+  }
   const sign = x=> x>0?1:x<0?-1:0;
-  const finalOrig = cumOrig[cumOrig.length-1]||0, finalPress = cumPress[cumPress.length-1]||0;
-  const origResult = sign(finalOrig), pressResult = sign(finalPress);
   const holesPlayed = results.filter(r=>r!==null).length;
-  return { teamA, teamB, results, cumOrig, cumPress, pressStartHole: pressPos!==null? holeStart+pressPos+1 : null,
-            origResult, pressResult, units: origResult+pressResult, holesPlayed, total:6,
-            liveCum: cumOrig[holesPlayed-1] ?? 0, pressActive: pressPos!==null, holeStart };
+  const lastIdx = lastPlayedIdx(results);
+  streams.forEach(s=>{ s.finalCum = lastIdx>=0 ? (s.cumHistory[lastIdx] ?? 0) : 0; s.result = sign(s.finalCum); });
+  const origResult = streams[0].result;
+  const numPresses = streams.length - 1;
+  const units = streams.reduce((a,s)=>a+s.result, 0);
+  return { teamA, teamB, results, streams, origResult, numPresses, units, holesPlayed, total:n,
+            liveCum: lastIdx>=0 ? (streams[0].cumHistory[lastIdx] ?? 0) : 0, pressActive: numPresses>0, holeStart };
 }
 function bestBallPlayerTotals(){
   const totals = {};
@@ -1067,7 +1089,7 @@ function renderMatch(){
 function renderBestBall(){
   const wrap = el(`<div></div>`);
   const ap = activePlayers();
-  const intro = el(`<div class="card"><div class="section-label">Game 2 · Better Ball Round Robin</div><p class="hint">3 six-hole rounds, a new partner each time. Lowest handicap in the field is zeroed; everyone else plays off that. A 1-down auto-press fires on either team.</p></div>`);
+  const intro = el(`<div class="card"><div class="section-label">Game 2 · Better Ball Round Robin</div><p class="hint">3 six-hole rounds, a new partner each time. Lowest handicap in the field is zeroed; everyone else plays off that. Best ball ties on the low score are broken by the second (partner's) ball. Every hole that's won outright — not tied — automatically adds a brand-new bet for the rest of that round, so a 6-hole match can carry up to 6 bets total.</p></div>`);
   wrap.appendChild(intro);
 
   if(ap.length<4){
@@ -1098,7 +1120,7 @@ function renderBestBall(){
 
     const res = bestBallRound(r);
     const nameOf = n => n? (state.players[n-1].name || ('Player '+n)) : '(sitting out)';
-    const flag = res.pressActive ? `<span class="press-flag">${FLAG_SVG} PRESS ON</span>` : '';
+    const flag = res.numPresses>0 ? `<span class="press-flag">${FLAG_SVG} ${res.numPresses} BET${res.numPresses===1?'':'S'} ADDED</span>` : '';
     const resultBlock = el(`
       <div class="nine-block">
         <div class="nine-head"><span class="label">${nameOf(rd.a[0])} &amp; ${nameOf(rd.a[1])} vs ${nameOf(rd.b[0])} &amp; ${nameOf(rd.b[1])}</span>${flag}</div>
