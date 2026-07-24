@@ -369,7 +369,7 @@ function activePlayers(){
 }
 function course(){ return state.courses[state.courseIdx] || {par:DEFAULT_PAR, si:DEFAULT_SI, name:"—"}; }
 
-function computeNine(scoresA, scoresB, diff, lowIsA, holeIdxs, threshold){
+function computeNine(scoresA, scoresB, diff, lowIsA, holeIdxs){
   const si = course().si;
   const results = holeIdxs.map(h=>{
     const gA = scoresA[h], gB = scoresB[h];
@@ -381,29 +381,58 @@ function computeNine(scoresA, scoresB, diff, lowIsA, holeIdxs, threshold){
     if(netA>netB) return -1;
     return 0;
   });
-  let running=0; const cumOrig = results.map(r=>running+=(r||0));
-  let pressPos=null;
-  for(let i=0;i<cumOrig.length;i++){ if(Math.abs(cumOrig[i])===threshold){ pressPos=i+1; break; } }
-  const cumPress = [];
-  if(pressPos!==null && pressPos<holeIdxs.length){
-    let r2=0;
-    for(let i=0;i<results.length;i++){ if(i>=pressPos){ r2+=(results[i]||0); cumPress.push(r2);} else cumPress.push(null); }
-  } else { for(let i=0;i<results.length;i++) cumPress.push(null); }
-  const sign = x=> x>0?1:x<0?-1:0;
-  const finalOrig = cumOrig[cumOrig.length-1]||0;
-  const finalPress = cumPress[cumPress.length-1]||0;
-  const origResult = sign(finalOrig), pressResult = sign(finalPress);
+  const n = holeIdxs.length;
   const holesPlayed = results.filter(r=>r!==null).length;
-  return { results, cumOrig, cumPress, pressStartHole: pressPos!==null? holeIdxs[0]+pressPos+1 : null,
-           origResult, pressResult, units: origResult+pressResult, holesPlayed, total: holeIdxs.length,
-           liveCum: cumOrig[holesPlayed-1] ?? 0, pressActive: pressPos!==null };
+  // Cascading auto-press: whenever an active bet stream reaches 2-down, a fresh
+  // press stream starts on the very next hole. A press can itself spawn another press.
+  const streams = [{ start:0, cum:0, triggered:false, cumHistory:[] }];
+  for(let h=0; h<n; h++){
+    const r = results[h] || 0;
+    for(const s of streams){
+      if(h >= s.start){
+        s.cum += r;
+        s.cumHistory[h] = s.cum;
+        if(!s.triggered && Math.abs(s.cum)===2){
+          s.triggered = true;
+          if(h+1 < n) streams.push({ start:h+1, cum:0, triggered:false, cumHistory:[] });
+        }
+      }
+    }
+  }
+  const sign = x=> x>0?1:x<0?-1:0;
+  streams.forEach(s=>{ s.finalCum = (s.cumHistory[holesPlayed-1] ?? 0); s.result = sign(s.finalCum); });
+  const origResult = streams[0].result;
+  const numPresses = streams.length - 1;
+  const units = streams.reduce((a,s)=>a+s.result, 0);
+  return { results, streams, origResult, numPresses, units, holesPlayed, total:n,
+           liveCum: streams[0].cumHistory[holesPlayed-1] ?? 0, pressActive: numPresses>0 };
+}
+function computeStraight(scoresA, scoresB, diff, lowIsA, holeIdxs){
+  const si = course().si;
+  const results = holeIdxs.map(h=>{
+    const gA = scoresA[h], gB = scoresB[h];
+    if(gA==null || gB==null) return null;
+    const sA = lowIsA ? 0 : strokesFor(diff, si[h]);
+    const sB = lowIsA ? strokesFor(diff, si[h]) : 0;
+    const netA = gA - sA, netB = gB - sB;
+    if(netA<netB) return 1;
+    if(netA>netB) return -1;
+    return 0;
+  });
+  let running = 0; const cum = results.map(r=> running += (r||0));
+  const holesPlayed = results.filter(r=>r!==null).length;
+  const sign = x=> x>0?1:x<0?-1:0;
+  const finalCum = cum[holesPlayed-1] ?? 0;
+  return { results, cum, result: sign(finalCum), holesPlayed, total: holeIdxs.length, liveCum: finalCum };
 }
 function computeMatch(pA, pB){
   const diff = Math.abs(pA.hcp - pB.hcp);
   const lowIsA = pA.hcp <= pB.hcp;
-  const front = computeNine(state.scores[pA.idx], state.scores[pB.idx], diff, lowIsA, [0,1,2,3,4,5,6,7,8], 2);
-  const back  = computeNine(state.scores[pA.idx], state.scores[pB.idx], diff, lowIsA, [9,10,11,12,13,14,15,16,17], 2);
-  return { pA, pB, front, back, total: front.units+back.units, diff, lowIsA };
+  const front = computeNine(state.scores[pA.idx], state.scores[pB.idx], diff, lowIsA, [0,1,2,3,4,5,6,7,8]);
+  const back  = computeNine(state.scores[pA.idx], state.scores[pB.idx], diff, lowIsA, [9,10,11,12,13,14,15,16,17]);
+  const all18 = computeStraight(state.scores[pA.idx], state.scores[pB.idx], diff, lowIsA, [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]);
+  const total = front.units + back.units + all18.result;
+  return { pA, pB, front, back, all18, total, diff, lowIsA };
 }
 function allMatches(){
   const ap = activePlayers();
@@ -977,7 +1006,7 @@ function renderJunkCard(ap, hIdx, isPar3){
 
 /* ---------- MATCH PLAY TAB ---------- */
 function nineCardHtml(nine, label){
-  const flag = nine.pressActive ? `<span class="press-flag">${FLAG_SVG} PRESS ON</span>` : '';
+  const flag = nine.numPresses>0 ? `<span class="press-flag">${FLAG_SVG} ${nine.numPresses} PRESS${nine.numPresses===1?'':'ES'}</span>` : '';
   return `
     <div class="nine-block">
       <div class="nine-head">
@@ -991,6 +1020,19 @@ function nineCardHtml(nine, label){
       </div>
     </div>`;
 }
+function straightCardHtml(leg, label){
+  return `
+    <div class="nine-block">
+      <div class="nine-head">
+        <span class="label">${label}</span>
+      </div>
+      ${holeBar(leg.results)}
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="status-pill ${pillClass(leg.liveCum)}">${leg.holesPlayed? pillText(leg.liveCum,'UP','DN') : 'NOT STARTED'}</span>
+        <span class="nine-units">${leg.holesPlayed? (leg.result>0?'+':'')+leg.result+' unit'+(Math.abs(leg.result)===1?'':'s') : '—'}</span>
+      </div>
+    </div>`;
+}
 
 function renderMatch(){
   const wrap = el(`<div></div>`);
@@ -999,7 +1041,7 @@ function renderMatch(){
     wrap.appendChild(el(`<div class="card empty-state">Add at least 2 players on Setup to generate matches.</div>`));
     return wrap;
   }
-  const intro = el(`<div class="card"><div class="section-label">Game 1 · Individual Match Play</div><p class="hint">Low handicap in each match plays scratch. Front &amp; back nine are separate bets — a 2-down auto-press fires on either nine.</p></div>`);
+  const intro = el(`<div class="card"><div class="section-label">Game 1 · Nassau (Match Play)</div><p class="hint">Low handicap in each match plays scratch. Three separate bets: front nine, back nine, and the overall 18. A 2-down auto-press fires on the front and back nine — and a press can itself go 2-down and spawn another press. The 18-hole bet is straight match play with no presses.</p></div>`);
   wrap.appendChild(intro);
   matches.forEach(m=>{
     const card = el(`<div class="card"></div>`);
@@ -1010,6 +1052,7 @@ function renderMatch(){
       <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-soft);">Strokes: ${m.lowIsA? m.pB.name : m.pA.name} gets ${m.diff}</div>
       ${nineCardHtml(m.front,'FRONT NINE')}
       ${nineCardHtml(m.back,'BACK NINE')}
+      ${straightCardHtml(m.all18,'ALL 18 · STRAIGHT, NO PRESS')}
       <div class="match-total">
         <span>${m.pA.name.split(' ')[0]} net</span>
         <span class="${m.total>0?'amt-pos':m.total<0?'amt-neg':'amt-zero'}">${m.total>0?'+':''}${m.total} unit${Math.abs(m.total)===1?'':'s'}</span>
