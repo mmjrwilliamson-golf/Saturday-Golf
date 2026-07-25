@@ -6,6 +6,7 @@
 <title>Stroke &amp; Press</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root{
   --paper:#F6F1E4;
@@ -564,6 +565,182 @@ function matchPlayPlayerTotals(){
     totals[m.pB.num]-=m.total;
   });
   return totals;
+}
+
+/* ---------- End-of-round summary report (text, used for .txt, PDF, and email) ---------- */
+function nameOfNum(n){ return n ? ((state.players[n-1] && state.players[n-1].name) || ('Player '+n)) : '?'; }
+function padR(str, len){ str = String(str); return str.length>=len ? str.slice(0,len) : str + ' '.repeat(len-str.length); }
+function padL(str, len){ str = String(str); return str.length>=len ? str.slice(-len) : ' '.repeat(len-str.length) + str; }
+function fmtSigned(x){ return (x>0?'+':'') + x; }
+function dateSlug(){ return new Date().toISOString().slice(0,10); }
+
+function grossNetTable(){
+  const ap = activePlayers();
+  const c = course();
+  return ap.map(p=>{
+    const scores = state.scores[p.idx];
+    const grossFront = scores.slice(0,9).reduce((a,b)=>a+(b||0),0);
+    const grossBack = scores.slice(9,18).reduce((a,b)=>a+(b||0),0);
+    const hcp = Number(p.hcp)||0;
+    let netFront=0, netBack=0;
+    for(let h=0;h<9;h++){ if(scores[h]!=null) netFront += scores[h]-strokesFor(hcp, c.si[h]); }
+    for(let h=9;h<18;h++){ if(scores[h]!=null) netBack += scores[h]-strokesFor(hcp, c.si[h]); }
+    return { name:p.name, grossFront, grossBack, grossTotal:grossFront+grossBack,
+             netFront, netBack, netTotal: netFront+netBack };
+  });
+}
+
+function buildSummaryReport(){
+  const ap = activePlayers();
+  const c = course();
+  const lines = [];
+  const dateStr = new Date().toLocaleDateString(undefined, {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+  lines.push('STROKE & PRESS -- END OF ROUND SUMMARY');
+  lines.push(`Course: ${c.name}    Date: ${dateStr}`);
+  lines.push('');
+
+  lines.push('GROSS SCORES');
+  lines.push(padR('Player',16) + padL('Front',7) + padL('Back',7) + padL('Total',7));
+  const gn = grossNetTable();
+  gn.forEach(r=>{ lines.push(padR(r.name,16) + padL(r.grossFront,7) + padL(r.grossBack,7) + padL(r.grossTotal,7)); });
+  lines.push('');
+
+  lines.push('NET SCORES (each player\'s own full course handicap)');
+  lines.push(padR('Player',16) + padL('Front',7) + padL('Back',7) + padL('Total',7));
+  gn.forEach(r=>{ lines.push(padR(r.name,16) + padL(r.netFront,7) + padL(r.netBack,7) + padL(r.netTotal,7)); });
+  lines.push('');
+  lines.push('-------------------------------------------');
+  lines.push('BET SUMMARY');
+  lines.push('-------------------------------------------');
+  lines.push('');
+
+  // Game 1: Nassau / Match Play
+  lines.push('GAME 1 -- NASSAU (MATCH PLAY)');
+  const matches = allMatches();
+  if(matches.length){
+    matches.forEach(m=>{
+      lines.push(`${m.pA.name} vs ${m.pB.name}`);
+      lines.push(`  Front ${fmtSigned(m.front.units)}u${m.front.numPresses?` (${m.front.numPresses} press${m.front.numPresses===1?'':'es'})`:''}` +
+                 `   Back ${fmtSigned(m.back.units)}u${m.back.numPresses?` (${m.back.numPresses} press${m.back.numPresses===1?'':'es'})`:''}` +
+                 `   All18 ${fmtSigned(m.all18.result)}u`);
+      lines.push(`  Combined: ${fmtSigned(m.total)} unit(s) for ${m.pA.name}`);
+    });
+  } else { lines.push('  (not enough players)'); }
+  lines.push('');
+  const mpTotals = matchPlayPlayerTotals();
+  lines.push('Nassau $ per player:');
+  ap.forEach(p=>{ lines.push('  ' + padR(p.name,16) + fmtMoney((mpTotals[p.num]||0)*state.unitMatch)); });
+  lines.push('');
+
+  // Game 2: Best Ball
+  lines.push('GAME 2 -- BEST BALL');
+  const bbBox = ap.length===5 && useBoxFormat();
+  if(ap.length>=4){
+    if(bbBox){
+      for(let r=0;r<3;r++){
+        const { box, matches: ms } = bestBallBoxRound(r);
+        lines.push(`Round ${r+1}: In the box -- ${box.map(nameOfNum).join(' & ')}`);
+        ms.forEach(({opponents, match})=>{
+          lines.push(`  vs ${opponents.map(nameOfNum).join(' & ')}: ${fmtSigned(match.units)}u${match.numPresses?` (${match.numPresses} bet${match.numPresses===1?'':'s'} added)`:''}`);
+        });
+      }
+    } else {
+      for(let r=0;r<3;r++){
+        const rd = state.rounds[r];
+        const res = bestBallRound(r);
+        lines.push(`Round ${r+1}: ${nameOfNum(rd.a[0])} & ${nameOfNum(rd.a[1])} vs ${nameOfNum(rd.b[0])} & ${nameOfNum(rd.b[1])}: ${fmtSigned(res.units)}u${res.numPresses?` (${res.numPresses} bet${res.numPresses===1?'':'s'} added)`:''}`);
+      }
+    }
+  } else { lines.push('  (needs at least 4 players)'); }
+  lines.push('');
+  const bbTotals = ap.length>=4 ? bestBallPlayerTotals() : {};
+  lines.push('Best Ball $ per player:');
+  ap.forEach(p=>{ lines.push('  ' + padR(p.name,16) + fmtMoney((bbTotals[p.num]||0)*state.unitBB)); });
+  lines.push('');
+
+  // Game 3: Pot of Gold
+  lines.push('GAME 3 -- POT OF GOLD');
+  const potParts = potParticipantsResolved();
+  if(potParts.length>=2){
+    const pog = computePotOfGold();
+    const potLine = (label, seg) => `${label} ($${seg.potTotal} pot): ` + (seg.complete
+      ? (seg.winners.length ? seg.winners.map(nameOfNum).join(' & ') + ' win ' + fmtMoney(seg.share) : 'no result')
+      : 'in progress');
+    lines.push('  ' + potLine('Front nine', pog.front));
+    lines.push('  ' + potLine('Back nine', pog.back));
+    lines.push('  ' + potLine('All 18', pog.all18));
+    lines.push('');
+    lines.push('Pot of Gold $ per player:');
+    pog.ap.forEach(p=>{ lines.push('  ' + padR(p.name,16) + fmtMoney(pog.netByPlayer[p.num]||0)); });
+  } else { lines.push('  (needs at least 2 players in the pot)'); }
+  lines.push('');
+
+  // Game 4: Junk
+  lines.push('GAME 4 -- JUNK');
+  const jkTotals = junkTotals();
+  const junkHoles = Object.keys(state.junks).filter(h => state.junks[h] && state.junks[h].events && state.junks[h].events.length);
+  if(junkHoles.length){
+    junkHoles.sort((a,b)=>Number(a)-Number(b)).forEach(hStr=>{
+      const jk = state.junks[hStr];
+      lines.push(`  Hole ${Number(hStr)+1}:`);
+      jk.events.forEach(ev=>{
+        lines.push(`    ${nameOfNum(ev.shooter)} owes 1 junk each to ${ev.winners.map(nameOfNum).join(', ')}`);
+      });
+    });
+    lines.push('');
+    lines.push('Junk $ per player:');
+    ap.forEach(p=>{ lines.push('  ' + padR(p.name,16) + fmtMoney(jkTotals[p.num]||0)); });
+  } else { lines.push('  (no junk bets logged)'); }
+  lines.push('');
+
+  lines.push('=============================================');
+  lines.push('FINAL TALLY');
+  lines.push('=============================================');
+  lines.push(padR('Player',16) + padL('Total $',12));
+  const pog2 = potParts.length>=2 ? computePotOfGold() : null;
+  ap.forEach(p=>{
+    const mp = (mpTotals[p.num]||0)*state.unitMatch;
+    const bb = (bbTotals[p.num]||0)*state.unitBB;
+    const gold = pog2 ? (pog2.netByPlayer[p.num]||0) : 0;
+    const junk = jkTotals[p.num]||0;
+    const total = mp+bb+gold+junk;
+    lines.push(padR(p.name,16) + padL(fmtMoney(total),12));
+  });
+
+  return lines.join('\n');
+}
+
+function downloadTextSummary(){
+  const text = buildSummaryReport();
+  const blob = new Blob([text], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `Round_Summary_${dateSlug()}.txt`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function downloadPdfSummary(){
+  if(!window.jspdf){ alert('The PDF library did not load -- check your internet connection and try again.'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'letter' });
+  doc.setFont('courier','normal');
+  doc.setFontSize(9);
+  const lines = buildSummaryReport().split('\n');
+  const marginX = 40, marginTop = 50, lineHeight = 12;
+  const pageHeight = doc.internal.pageSize.getHeight();
+  let y = marginTop;
+  lines.forEach(line=>{
+    if(y > pageHeight - 40){ doc.addPage(); y = marginTop; }
+    doc.text(line, marginX, y);
+    y += lineHeight;
+  });
+  doc.save(`Round_Summary_${dateSlug()}.pdf`);
+}
+function emailSummary(){
+  const text = buildSummaryReport();
+  const subject = encodeURIComponent('Stroke & Press -- Round Summary');
+  const body = encodeURIComponent(text);
+  window.location.href = `mailto:?subject=${subject}&body=${body}`;
 }
 
 /* ---------- Pot of Gold: low net front / low net back / low net 18, full handicap ---------- */
@@ -1429,6 +1606,22 @@ function renderPayout(){
       tc.appendChild(row);
     });
   }
+
+  const exportCard = el(`<div class="card"></div>`);
+  exportCard.innerHTML = `
+    <div class="section-label">End of Round Summary</div>
+    <p class="hint">Gross &amp; net scores (front/back/18), every bet broken down, and the final tally -- ready to save or send to the group.</p>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <button class="btn-primary btn-block" id="dlPdfBtn">Download PDF</button>
+      <button class="btn-ghost btn-block" id="dlTxtBtn">Download Text File</button>
+      <button class="btn-ghost btn-block" id="emailBtn">Email Summary</button>
+    </div>
+  `;
+  exportCard.querySelector('#dlPdfBtn').onclick = downloadPdfSummary;
+  exportCard.querySelector('#dlTxtBtn').onclick = downloadTextSummary;
+  exportCard.querySelector('#emailBtn').onclick = emailSummary;
+  wrap.appendChild(exportCard);
+
   return wrap;
 }
 
