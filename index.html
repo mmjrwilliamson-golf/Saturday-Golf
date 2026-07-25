@@ -7,6 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 <style>
 :root{
   --paper:#F6F1E4;
@@ -351,32 +353,131 @@ function defaultState(){
 let state = defaultState();
 let activeTab = "setup";
 
-/* ---------- persistence (localStorage — works on any hosted site) ---------- */
+/* ---------- persistence: localStorage always; optional Firestore cloud sync on top ---------- */
 let saveTimer = null;
+let cloud = { db:null, code:null, ref:null, unsub:null, connected:false, applyingRemote:false };
+
+// Firestore doesn't support arrays-of-arrays, and state.scores is an array of 5 per-player
+// arrays -- so it gets flattened to an object ({p0:[...], p1:[...], ...}) for cloud storage only.
+function scoresToFirestore(scores){
+  const obj = {};
+  scores.forEach((row,i)=>{ obj['p'+i] = row; });
+  return obj;
+}
+function scoresFromFirestore(obj){
+  const arr = [];
+  for(let i=0;i<5;i++){ arr.push((obj && obj['p'+i]) || Array(18).fill(null)); }
+  return arr;
+}
+function stateForCloud(s){
+  return { ...s, scores: scoresToFirestore(s.scores) };
+}
+function stateFromCloud(data){
+  return { ...data, scores: scoresFromFirestore(data.scores) };
+}
+
+function localCloudConfig(){
+  try{
+    const cfgRaw = localStorage.getItem('sp-firebase-config');
+    const code = localStorage.getItem('sp-group-code');
+    if(!cfgRaw || !code) return null;
+    return { config: JSON.parse(cfgRaw), code: code.trim().toUpperCase() };
+  }catch(e){ return null; }
+}
+function saveLocalCloudConfig(configObj, code){
+  localStorage.setItem('sp-firebase-config', JSON.stringify(configObj));
+  localStorage.setItem('sp-group-code', code.trim().toUpperCase());
+}
+function clearLocalCloudConfig(){
+  localStorage.removeItem('sp-firebase-config');
+  localStorage.removeItem('sp-group-code');
+}
+
 function scheduleSave(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(()=>{
-    try{
-      localStorage.setItem('stroke-and-press-state', JSON.stringify(state));
+    try{ localStorage.setItem('stroke-and-press-state', JSON.stringify(state)); }catch(e){ console.warn('local save failed', e); }
+    if(cloud.connected && cloud.ref && !cloud.applyingRemote){
+      cloud.ref.set(stateForCloud(state)).then(flashSaved).catch(e=>{ console.warn('cloud save failed', e); flashSaved(true); });
+    } else {
       flashSaved();
-    }catch(e){ console.warn('save failed', e); }
+    }
   }, 400);
 }
-function flashSaved(){
+function flashSaved(isError){
   const t = document.getElementById('saveTag');
+  if(!t) return;
+  t.textContent = isError ? 'SYNC ERROR' : (cloud.connected ? 'SYNCED' : 'SAVED');
   t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 900);
 }
+
+function connectCloud(configObj, code){
+  code = code.trim().toUpperCase();
+  try{
+    if(!firebase.apps || !firebase.apps.length){ firebase.initializeApp(configObj); }
+    const db = firebase.firestore();
+    const ref = db.collection('rounds').doc(code);
+    cloud.db = db; cloud.code = code; cloud.ref = ref;
+    if(cloud.unsub) cloud.unsub();
+    cloud.unsub = ref.onSnapshot(doc=>{
+      cloud.applyingRemote = true;
+      if(doc.exists){
+        state = Object.assign(defaultState(), stateFromCloud(doc.data()));
+      } else {
+        // first player to use this code -- seed it with current local state
+        ref.set(stateForCloud(state)).catch(e=>console.warn('seed failed', e));
+      }
+      cloud.applyingRemote = false;
+      renderAll();
+    }, err=>{
+      console.warn('cloud listen error', err);
+      cloud.connected = false;
+      renderAll();
+    });
+    cloud.connected = true;
+    saveLocalCloudConfig(configObj, code);
+    return true;
+  }catch(e){
+    console.warn('connectCloud failed', e);
+    return false;
+  }
+}
+function disconnectCloud(){
+  if(cloud.unsub) cloud.unsub();
+  cloud = { db:null, code:null, ref:null, unsub:null, connected:false, applyingRemote:false };
+  clearLocalCloudConfig();
+  renderAll();
+}
+
 function loadState(){
   try{
     const raw = localStorage.getItem('stroke-and-press-state');
-    if(raw){
-      const loaded = JSON.parse(raw);
-      state = Object.assign(defaultState(), loaded);
-    }
+    if(raw){ state = Object.assign(defaultState(), JSON.parse(raw)); }
   }catch(e){ /* no saved state yet, or storage unavailable (e.g. private browsing) */ }
+  const cfg = localCloudConfig();
+  if(cfg && window.firebase){
+    connectCloud(cfg.config, cfg.code);
+  }
   renderAll();
 }
+
+/* ---------- Round history (archived when "Start New Round" is used while connected) ---------- */
+async function archiveCurrentRoundToHistory(){
+  if(!cloud.connected || !cloud.ref) return;
+  try{
+    const ts = new Date().toISOString();
+    await cloud.ref.collection('history').doc(ts).set({ ...stateForCloud(state), archivedAt: ts });
+  }catch(e){ console.warn('archive failed', e); }
+}
+async function fetchRoundHistory(){
+  if(!cloud.connected || !cloud.ref) return [];
+  try{
+    const snap = await cloud.ref.collection('history').orderBy('archivedAt','desc').limit(25).get();
+    return snap.docs.map(d=>stateFromCloud(d.data()));
+  }catch(e){ console.warn('fetch history failed', e); return []; }
+}
+
 
 /* ============================================================
    GOLF LOGIC
@@ -997,8 +1098,10 @@ function renderSetup(){
     <p class="hint">Ready to play again? This clears everyone's hole-by-hole scores and any Junk bets, but keeps your players, handicaps, course and Best Ball team setup — no need to re-enter anything.</p>
     <button class="btn-ghost btn-block" id="newRoundBtn" style="border-color:var(--flag); color:var(--flag);">Start New Round (clear scores)</button>
   `;
-  rc.querySelector('#newRoundBtn').onclick = ()=>{
-    if(confirm('Clear all scores for a new round? Players, handicaps, course and teams will stay as they are.')){
+  rc.querySelector('#newRoundBtn').onclick = async ()=>{
+    const archiveNote = cloud.connected ? ' This round will be saved to History first.' : '';
+    if(confirm('Clear all scores for a new round?' + archiveNote + ' Players, handicaps, course and teams will stay as they are.')){
+      if(cloud.connected){ await archiveCurrentRoundToHistory(); }
       state.scores = state.players.map(()=>Array(18).fill(null));
       state.junks = {};
       state.currentHole = 1;
@@ -1008,7 +1111,105 @@ function renderSetup(){
   };
   wrap.appendChild(rc);
 
+  wrap.appendChild(renderCloudSyncCard());
+  if(cloud.connected){ wrap.appendChild(renderHistoryCard()); }
+
   return wrap;
+}
+
+function renderCloudSyncCard(){
+  const card = el(`<div class="card"></div>`);
+  if(cloud.connected){
+    card.innerHTML = `
+      <div class="section-label">Cloud Sync</div>
+      <p class="hint">🟢 Connected — this device is syncing live with group code <b>${cloud.code}</b>. Anyone who enters the same code sees and edits the same round in real time.</p>
+      <button class="btn-ghost btn-block" id="disconnectBtn">Disconnect this device</button>
+    `;
+    card.querySelector('#disconnectBtn').onclick = ()=>{
+      if(confirm('Disconnect from cloud sync? This device will go back to saving locally only.')){
+        disconnectCloud();
+      }
+    };
+  } else {
+    card.innerHTML = `
+      <div class="section-label">Cloud Sync</div>
+      <p class="hint">Optional: connect this device to a shared online round so everyone's phone sees the same live scores. Requires a free Firebase project (one-time setup, takes about 5 minutes) — tap below for step-by-step instructions. Once it's set up, every other player just enters the same Group Code and your Firebase config below; no project creation needed twice.</p>
+      <button class="link-btn" id="toggleCloudHelp">+ How do I set this up?</button>
+      <div id="cloudHelpArea" style="display:none; margin:10px 0;"></div>
+      <label class="field-label" style="margin-top:10px;">Group Code</label>
+      <input type="text" id="groupCodeInput" placeholder="e.g. SATURDAY-GUYS" style="text-transform:uppercase;">
+      <label class="field-label" style="margin-top:10px;">Firebase Config (paste the whole object from your Firebase console)</label>
+      <textarea id="fbConfigInput" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...", ...}' style="width:100%; min-height:90px; padding:10px 11px; border:1.5px solid var(--line); border-radius:9px; font-family:'IBM Plex Mono',monospace; font-size:12px; background:var(--paper); color:var(--ink);"></textarea>
+      <button class="btn-primary btn-block" id="connectBtn" style="margin-top:10px;">Connect</button>
+      <p class="hint" id="connectError" style="color:var(--flag); display:none; margin-top:8px;"></p>
+    `;
+    const helpBtn = card.querySelector('#toggleCloudHelp');
+    const helpArea = card.querySelector('#cloudHelpArea');
+    helpBtn.onclick = ()=>{
+      const open = helpArea.style.display !== 'none';
+      helpArea.style.display = open ? 'none' : 'block';
+      helpBtn.textContent = open ? '+ How do I set this up?' : '– Hide instructions';
+      if(!open){
+        helpArea.innerHTML = `
+          <div class="divider-note" style="text-align:left; line-height:1.7;">
+            1. Go to <b>console.firebase.google.com</b> and sign in with any Google account.<br>
+            2. Click <b>Add project</b>, give it any name, and finish the wizard (defaults are fine).<br>
+            3. On the project page, click the <b>&lt;/&gt;</b> (web) icon to add a web app. Name it anything and click Register.<br>
+            4. Firebase shows you a code block starting with <b>const firebaseConfig = {...}</b> — copy just the <b>{...}</b> part and paste it into the box below.<br>
+            5. In the left sidebar, go to <b>Build → Firestore Database → Create database</b>. Choose <b>Start in test mode</b> and pick any location.<br>
+            6. In Firestore, open the <b>Rules</b> tab and paste:<br>
+            <span class="mono" style="display:block; background:var(--paper-2); padding:8px; border-radius:6px; margin:4px 0; font-size:11px;">rules_version = '2';<br>service cloud.firestore {<br>&nbsp;&nbsp;match /databases/{db}/documents {<br>&nbsp;&nbsp;&nbsp;&nbsp;match /rounds/{code} {<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;allow read, write: if true;<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;match /history/{entry} { allow read, write: if true; }<br>&nbsp;&nbsp;&nbsp;&nbsp;}<br>&nbsp;&nbsp;}<br>}</span>
+            then click <b>Publish</b>.<br>
+            7. Pick a Group Code below (anything, e.g. your group's name) and hit Connect. Send the same config + code to your buddies once, and everyone's set from then on.<br>
+            <b>Note:</b> this makes the round readable/writable by anyone who has the code — fine for a friendly game, but don't reuse it for anything sensitive.
+          </div>`;
+      }
+    };
+    card.querySelector('#connectBtn').onclick = ()=>{
+      const code = card.querySelector('#groupCodeInput').value.trim();
+      const raw = card.querySelector('#fbConfigInput').value.trim();
+      const errEl = card.querySelector('#connectError');
+      errEl.style.display = 'none';
+      if(!code){ errEl.textContent = 'Enter a group code.'; errEl.style.display='block'; return; }
+      if(!window.firebase){ errEl.textContent = 'Firebase library did not load -- check your internet connection.'; errEl.style.display='block'; return; }
+      let cfg;
+      try{ cfg = JSON.parse(raw); }
+      catch(e){ errEl.textContent = 'That doesn\'t look like valid JSON -- paste the config object exactly as Firebase gave it to you.'; errEl.style.display='block'; return; }
+      const ok = connectCloud(cfg, code);
+      if(!ok){ errEl.textContent = 'Could not connect -- double check the config and try again.'; errEl.style.display='block'; return; }
+      renderAll();
+    };
+  }
+  return card;
+}
+
+function renderHistoryCard(){
+  const card = el(`<div class="card"></div>`);
+  card.innerHTML = `<div class="section-label">History</div><p class="hint">Past rounds saved under group code ${cloud.code}.</p><div id="historyList" class="hint">Loading…</div>`;
+  const listEl = card.querySelector('#historyList');
+  fetchRoundHistory().then(rounds=>{
+    if(!rounds.length){ listEl.textContent = 'No past rounds yet -- they show up here after you use "Start New Round."'; return; }
+    listEl.innerHTML = '';
+    rounds.forEach(snap=>{
+      const dateStr = snap.archivedAt ? new Date(snap.archivedAt).toLocaleDateString(undefined,{weekday:'short', year:'numeric', month:'short', day:'numeric'}) : 'Unknown date';
+      const courseName = (snap.courses && snap.courses[snap.courseIdx] && snap.courses[snap.courseIdx].name) || '—';
+      const row = el(`<div class="payout-row"><div><div class="payout-name">${dateStr}</div><div class="payout-sub">${courseName}</div></div><button class="btn-ghost btn-small">View</button></div>`);
+      row.querySelector('button').onclick = ()=>{
+        const liveState = state;
+        state = snap;
+        const text = buildSummaryReport();
+        state = liveState;
+        const blob = new Blob([text], {type:'text/plain'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `Round_Summary_${dateStr.replace(/[, ]+/g,'_')}.txt`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+      listEl.appendChild(row);
+    });
+  });
+  return card;
 }
 
 function renderCourseEditor(container, open){
