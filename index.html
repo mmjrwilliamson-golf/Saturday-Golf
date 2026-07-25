@@ -541,18 +541,18 @@ function bestBallPlayerTotals(){
     for(let r=0;r<3;r++){
       const { box, matches } = bestBallBoxRound(r);
       matches.forEach(({opponents, match})=>{
-        const half = match.units/2;
-        box.forEach(n=>{ totals[n]+=half; });
-        opponents.forEach(n=>{ totals[n]-=half; });
+        const delta = match.units;
+        box.forEach(n=>{ totals[n]+=delta; });
+        opponents.forEach(n=>{ totals[n]-=delta; });
       });
     }
   } else {
     for(let r=0;r<3;r++){
       const res = bestBallRound(r);
       const rd = state.rounds[r];
-      const half = res.units/2;
-      [rd.a[0],rd.a[1]].forEach(n=>{ if(n) totals[n]+=half; });
-      [rd.b[0],rd.b[1]].forEach(n=>{ if(n) totals[n]-=half; });
+      const delta = res.units;
+      [rd.a[0],rd.a[1]].forEach(n=>{ if(n) totals[n]+=delta; });
+      [rd.b[0],rd.b[1]].forEach(n=>{ if(n) totals[n]-=delta; });
     }
   }
   return totals;
