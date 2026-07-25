@@ -376,6 +376,18 @@ function stateFromCloud(data){
   return { ...data, scores: scoresFromFirestore(data.scores) };
 }
 
+function parseFirebaseConfig(raw){
+  // Firebase's console gives you a JS object literal (unquoted keys, sometimes trailing
+  // "const firebaseConfig = ... ;"), not strict JSON. Accept either.
+  let cleaned = raw.trim();
+  cleaned = cleaned.replace(/^\s*(export\s+)?(const|var|let)\s+\w+\s*=\s*/,'');
+  cleaned = cleaned.replace(/;\s*$/,'');
+  try{ return JSON.parse(cleaned); }
+  catch(e){ /* fall through */ }
+  try{ return (new Function('return (' + cleaned + ')'))(); }
+  catch(e){ return null; }
+}
+
 function localCloudConfig(){
   try{
     const cfgRaw = localStorage.getItem('sp-firebase-config');
@@ -1172,9 +1184,11 @@ function renderCloudSyncCard(){
       errEl.style.display = 'none';
       if(!code){ errEl.textContent = 'Enter a group code.'; errEl.style.display='block'; return; }
       if(!window.firebase){ errEl.textContent = 'Firebase library did not load -- check your internet connection.'; errEl.style.display='block'; return; }
-      let cfg;
-      try{ cfg = JSON.parse(raw); }
-      catch(e){ errEl.textContent = 'That doesn\'t look like valid JSON -- paste the config object exactly as Firebase gave it to you.'; errEl.style.display='block'; return; }
+      let cfg = parseFirebaseConfig(raw);
+      if(!cfg || typeof cfg !== 'object' || !cfg.projectId){
+        errEl.textContent = 'Couldn\'t read that config -- paste the whole { ... } object exactly as Firebase gave it to you (it\'s fine if the keys aren\'t in quotes).';
+        errEl.style.display='block'; return;
+      }
       const ok = connectCloud(cfg, code);
       if(!ok){ errEl.textContent = 'Could not connect -- double check the config and try again.'; errEl.style.display='block'; return; }
       renderAll();
