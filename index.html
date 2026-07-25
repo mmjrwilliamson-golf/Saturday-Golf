@@ -276,6 +276,21 @@ nav.tabbar button.active .tlabel{color:var(--fairway);}
 .buyin-strip > div{flex:1; text-align:center; background:var(--paper-2); border-radius:9px; padding:8px 4px;}
 .buyin-strip .blabel{font-family:'IBM Plex Mono',monospace; font-size:9.5px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.5px;}
 .buyin-strip input{text-align:center; padding:6px 4px; font-size:14px; margin-top:3px;}
+
+/* ---------- Bet on/off toggle ---------- */
+.bet-toggle-row{display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--line);}
+.bet-toggle-row:last-child{border-bottom:none;}
+.bet-toggle-name{font-weight:600; font-size:14.5px;}
+.bet-toggle-sub{font-size:11.5px; color:var(--ink-soft); margin-top:1px;}
+.switch{position:relative; width:46px; height:26px; flex-shrink:0; border-radius:999px; background:var(--line); border:none; padding:0; cursor:pointer; transition:background 0.2s;}
+.switch.on{background:var(--turf);}
+.switch .knob{position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:var(--white); transition:left 0.2s; box-shadow:0 1px 2px rgba(0,0,0,0.25);}
+.switch.on .knob{left:23px;}
+.off-banner{
+  display:flex; align-items:center; gap:8px; background:var(--paper-2); color:var(--ink-soft);
+  font-family:'IBM Plex Mono',monospace; font-size:11.5px; font-weight:600; padding:9px 12px;
+  border-radius:9px; margin-bottom:12px;
+}
 </style>
 </head>
 <body>
@@ -317,6 +332,9 @@ function defaultState(){
     rounds: [ {a:[1,2],b:[3,4]}, {a:[1,3],b:[2,4]}, {a:[1,4],b:[2,3]} ],
     boxRounds: [ {box:[1,2]}, {box:[3,4]}, {box:[5,1]} ],
     bestBallFormat: '5',
+    enableMatchPlay: true,
+    enableBestBall: true,
+    enablePotOfGold: true,
     unitMatch: 5,
     unitBB: 5,
     potFront: 5,
@@ -615,9 +633,11 @@ function buildSummaryReport(){
   lines.push('');
 
   // Game 1: Nassau / Match Play
-  lines.push('GAME 1 -- NASSAU (MATCH PLAY)');
+  lines.push('GAME 1 -- NASSAU (MATCH PLAY)' + (state.enableMatchPlay ? '' : '  [OFF -- not counted in payout]'));
   const matches = allMatches();
-  if(matches.length){
+  if(!state.enableMatchPlay){
+    lines.push('  (turned off in Setup)');
+  } else if(matches.length){
     matches.forEach(m=>{
       lines.push(`${m.pA.name} vs ${m.pB.name}`);
       lines.push(`  Front ${fmtSigned(m.front.units)}u${m.front.numPresses?` (${m.front.numPresses} press${m.front.numPresses===1?'':'es'})`:''}` +
@@ -627,15 +647,19 @@ function buildSummaryReport(){
     });
   } else { lines.push('  (not enough players)'); }
   lines.push('');
-  const mpTotals = matchPlayPlayerTotals();
-  lines.push('Nassau $ per player:');
-  ap.forEach(p=>{ lines.push('  ' + padR(p.name,16) + fmtMoney((mpTotals[p.num]||0)*state.unitMatch)); });
-  lines.push('');
+  const mpTotals = state.enableMatchPlay ? matchPlayPlayerTotals() : {};
+  if(state.enableMatchPlay){
+    lines.push('Nassau $ per player:');
+    ap.forEach(p=>{ lines.push('  ' + padR(p.name,16) + fmtMoney((mpTotals[p.num]||0)*state.unitMatch)); });
+    lines.push('');
+  }
 
   // Game 2: Best Ball
-  lines.push('GAME 2 -- BEST BALL');
+  lines.push('GAME 2 -- BEST BALL' + (state.enableBestBall ? '' : '  [OFF -- not counted in payout]'));
   const bbBox = ap.length===5 && useBoxFormat();
-  if(ap.length>=4){
+  if(!state.enableBestBall){
+    lines.push('  (turned off in Setup)');
+  } else if(ap.length>=4){
     if(bbBox){
       for(let r=0;r<3;r++){
         const { box, matches: ms } = bestBallBoxRound(r);
@@ -653,16 +677,22 @@ function buildSummaryReport(){
     }
   } else { lines.push('  (needs at least 4 players)'); }
   lines.push('');
-  const bbTotals = ap.length>=4 ? bestBallPlayerTotals() : {};
-  lines.push('Best Ball $ per player:');
-  ap.forEach(p=>{ lines.push('  ' + padR(p.name,16) + fmtMoney((bbTotals[p.num]||0)*state.unitBB)); });
-  lines.push('');
+  const bbTotals = (state.enableBestBall && ap.length>=4) ? bestBallPlayerTotals() : {};
+  if(state.enableBestBall){
+    lines.push('Best Ball $ per player:');
+    ap.forEach(p=>{ lines.push('  ' + padR(p.name,16) + fmtMoney((bbTotals[p.num]||0)*state.unitBB)); });
+    lines.push('');
+  }
 
   // Game 3: Pot of Gold
-  lines.push('GAME 3 -- POT OF GOLD');
+  lines.push('GAME 3 -- POT OF GOLD' + (state.enablePotOfGold ? '' : '  [OFF -- not counted in payout]'));
   const potParts = potParticipantsResolved();
-  if(potParts.length>=2){
+  let pog2 = null;
+  if(!state.enablePotOfGold){
+    lines.push('  (turned off in Setup)');
+  } else if(potParts.length>=2){
     const pog = computePotOfGold();
+    pog2 = pog;
     const potLine = (label, seg) => `${label} ($${seg.potTotal} pot): ` + (seg.complete
       ? (seg.winners.length ? seg.winners.map(nameOfNum).join(' & ') + ' win ' + fmtMoney(seg.share) : 'no result')
       : 'in progress');
@@ -697,11 +727,10 @@ function buildSummaryReport(){
   lines.push('FINAL TALLY');
   lines.push('=============================================');
   lines.push(padR('Player',16) + padL('Total $',12));
-  const pog2 = potParts.length>=2 ? computePotOfGold() : null;
   ap.forEach(p=>{
-    const mp = (mpTotals[p.num]||0)*state.unitMatch;
-    const bb = (bbTotals[p.num]||0)*state.unitBB;
-    const gold = pog2 ? (pog2.netByPlayer[p.num]||0) : 0;
+    const mp = state.enableMatchPlay ? (mpTotals[p.num]||0)*state.unitMatch : 0;
+    const bb = state.enableBestBall ? (bbTotals[p.num]||0)*state.unitBB : 0;
+    const gold = (state.enablePotOfGold && pog2) ? (pog2.netByPlayer[p.num]||0) : 0;
     const junk = jkTotals[p.num]||0;
     const total = mp+bb+gold+junk;
     lines.push(padR(p.name,16) + padL(fmtMoney(total),12));
@@ -909,6 +938,36 @@ function renderSetup(){
     renderCourseEditor(cc.querySelector('#courseEditorArea'), editorOpen);
   };
   wrap.appendChild(cc);
+
+  const betsCard = el(`<div class="card"></div>`);
+  betsCard.innerHTML = `
+    <div class="section-label">Bets</div>
+    <p class="hint">Turn a bet off to leave it out of the Payout tab and the end-of-round summary entirely — nothing from that game will count toward anyone's total.</p>
+    <div id="betToggleRows"></div>
+  `;
+  const rowsWrap = betsCard.querySelector('#betToggleRows');
+  const betDefs = [
+    { key:'enableMatchPlay', label:'Match Play (Nassau)', sub:'Front / Back / All 18, with auto-presses' },
+    { key:'enableBestBall', label:'Best Ball', sub:'6-hole partner rounds' },
+    { key:'enablePotOfGold', label:'Pot of Gold', sub:'Low net buy-in pot' },
+  ];
+  betDefs.forEach(def=>{
+    const row = el(`
+      <div class="bet-toggle-row">
+        <div>
+          <div class="bet-toggle-name">${def.label}</div>
+          <div class="bet-toggle-sub">${def.sub}</div>
+        </div>
+        <button type="button" class="switch ${state[def.key]?'on':''}"><span class="knob"></span></button>
+      </div>`);
+    const btn = row.querySelector('.switch');
+    btn.onclick = ()=>{
+      state[def.key] = !state[def.key];
+      scheduleSave(); renderAll();
+    };
+    rowsWrap.appendChild(row);
+  });
+  wrap.appendChild(betsCard);
 
   const pc = el(`<div class="card"></div>`);
   pc.innerHTML = `
@@ -1283,6 +1342,9 @@ function straightCardHtml(leg, label){
 
 function renderMatch(){
   const wrap = el(`<div></div>`);
+  if(!state.enableMatchPlay){
+    wrap.appendChild(el(`<div class="off-banner">🔕 Match Play is turned OFF — excluded from Payout. Turn it back on in Setup.</div>`));
+  }
   const matches = allMatches();
   if(matches.length===0){
     wrap.appendChild(el(`<div class="card empty-state">Add at least 2 players on Setup to generate matches.</div>`));
@@ -1314,6 +1376,9 @@ function renderMatch(){
 /* ---------- BEST BALL TAB ---------- */
 function renderBestBall(){
   const wrap = el(`<div></div>`);
+  if(!state.enableBestBall){
+    wrap.appendChild(el(`<div class="off-banner">🔕 Best Ball is turned OFF — excluded from Payout. Turn it back on in Setup.</div>`));
+  }
   const ap = activePlayers();
   const boxMode = useBoxFormat();
   const introText = boxMode
@@ -1450,6 +1515,9 @@ function renderBestBallBox(wrap, ap){
 /* ---------- POT OF GOLD TAB ---------- */
 function renderPotOfGold(){
   const wrap = el(`<div></div>`);
+  if(!state.enablePotOfGold){
+    wrap.appendChild(el(`<div class="off-banner">🔕 Pot of Gold is turned OFF — excluded from Payout. Turn it back on in Setup.</div>`));
+  }
   const ap = activePlayers();
 
   const intro = el(`<div class="card"></div>`);
@@ -1583,9 +1651,9 @@ function renderPayout(){
     const tc = document.getElementById('payoutTable');
     if(!tc) return;
     if(!ap.length){ tc.innerHTML = `<div class="empty-state">Add players on Setup to see payouts.</div>`; return; }
-    const mpTotals = matchPlayPlayerTotals();
-    const bbTotals = ap.length>=4 ? bestBallPlayerTotals() : {};
-    const pog = ap.length>=2 ? computePotOfGold() : null;
+    const mpTotals = state.enableMatchPlay ? matchPlayPlayerTotals() : {};
+    const bbTotals = (state.enableBestBall && ap.length>=4) ? bestBallPlayerTotals() : {};
+    const pog = (state.enablePotOfGold && ap.length>=2) ? computePotOfGold() : null;
     const jkTotals = junkTotals();
     tc.innerHTML = `<div class="section-label">Net Payout</div>`;
     ap.forEach(p=>{
@@ -1595,11 +1663,16 @@ function renderPayout(){
       const jkD = jkTotals[p.num]||0;
       const mpD = mpU*state.unitMatch, bbD = bbU*state.unitBB;
       const totalD = mpD+bbD+potD+jkD;
+      const parts = [];
+      parts.push(state.enableMatchPlay ? `Nassau ${mpU>0?'+':''}${mpU}u (F+B+18)` : `Nassau off`);
+      parts.push(state.enableBestBall ? `Best Ball ${bbU>0?'+':''}${bbU}u` : `Best Ball off`);
+      parts.push(state.enablePotOfGold ? `Gold ${fmtMoney(potD)}` : `Gold off`);
+      parts.push(`Junk ${fmtMoney(jkD)}`);
       const row = el(`
         <div class="payout-row">
           <div>
             <div class="payout-name">${p.name}</div>
-            <div class="payout-sub">Nassau ${mpU>0?'+':''}${mpU}u (F+B+18) · Best Ball ${bbU>0?'+':''}${bbU}u · Gold ${fmtMoney(potD)} · Junk ${fmtMoney(jkD)}</div>
+            <div class="payout-sub">${parts.join(' · ')}</div>
           </div>
           <div class="payout-amt ${totalD>0?'amt-pos':totalD<0?'amt-neg':'amt-zero'}">${fmtMoney(totalD)}</div>
         </div>`);
