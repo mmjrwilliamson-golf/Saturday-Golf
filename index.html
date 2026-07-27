@@ -1122,6 +1122,13 @@ function renderAll(){
 }
 
 /* ---------- SETUP TAB ---------- */
+function rosterOptionsHtml(selectedName){
+  let html = `<option value="" ${!selectedName?'selected':''}>— sitting out —</option>`;
+  state.roster.forEach((r,ri)=>{
+    html += `<option value="${ri}" ${r.name===selectedName?'selected':''}>${r.name||'(unnamed)'}</option>`;
+  });
+  return html;
+}
 function renderSetup(){
   const wrap = el(`<div></div>`);
 
@@ -1197,13 +1204,6 @@ function renderSetup(){
     }
   });
   if(rosterChanged) scheduleSave();
-  function rosterOptionsHtml(selectedName){
-    let html = `<option value="" ${!selectedName?'selected':''}>— sitting out —</option>`;
-    state.roster.forEach((r,ri)=>{
-      html += `<option value="${ri}" ${r.name===selectedName?'selected':''}>${r.name||'(unnamed)'}</option>`;
-    });
-    return html;
-  }
   state.players.forEach((p,i)=>{
     const row = el(`
       <div class="player-row">
@@ -1368,7 +1368,17 @@ function renderRosterEditor(container, open){
         <button class="btn-ghost btn-small" data-del="${ri}">×</button>
       </div>`);
     const inputs = row.querySelectorAll('input');
-    inputs[0].oninput = ()=>{ r.name = inputs[0].value; scheduleSave(); };
+    inputs[0].oninput = ()=>{
+      const oldName = r.name;
+      const newName = inputs[0].value;
+      if(oldName){
+        state.players.forEach(p=>{ if(p.name===oldName) p.name = newName; });
+      }
+      r.name = newName;
+      scheduleSave();
+      const dropdowns = document.querySelectorAll('#playerRows select');
+      dropdowns.forEach((sel,i)=>{ sel.innerHTML = rosterOptionsHtml(state.players[i].name); });
+    };
     inputs[1].oninput = ()=>{ r.hcp = inputs[1].value===''? '' : Number(inputs[1].value); scheduleSave(); };
     row.querySelector('[data-del]').onclick = ()=>{
       state.roster.splice(ri,1);
