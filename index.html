@@ -326,6 +326,10 @@ function defaultState(){
       { name:"Sample Course B", par:[4,5,3,4,4,5,3,4,4, 4,4,3,5,4,4,3,5,4], si:[11,3,17,9,5,1,15,13,7, 6,14,2,18,10,4,16,8,12] }
     ],
     courseIdx: 0,
+    roster: [
+      {name:"Player 1", hcp:8}, {name:"Player 2", hcp:12}, {name:"Player 3", hcp:5},
+      {name:"Player 4", hcp:18}, {name:"Player 5", hcp:10}
+    ],
     players: [
       {name:"Player 1", hcp:8}, {name:"Player 2", hcp:12}, {name:"Player 3", hcp:5},
       {name:"Player 4", hcp:18}, {name:"Player 5", hcp:""}
@@ -337,6 +341,7 @@ function defaultState(){
     enableMatchPlay: true,
     enableBestBall: true,
     enablePotOfGold: true,
+    enableNinePoint: true,
     unitMatch: 5,
     unitBB: 5,
     potFront: 5,
@@ -345,6 +350,9 @@ function defaultState(){
     junkAmount: 5,
     junks: {},
     potParticipants: null,
+    unitNinePoint: 1,
+    ninePointMultiplier: Array(18).fill(1),
+    ninePointParticipants: null,
     currentHole: 1,
     gridView: false
   };
@@ -818,8 +826,25 @@ function buildSummaryReport(){
   } else { lines.push('  (needs at least 2 players in the pot)'); }
   lines.push('');
 
-  // Game 4: Junk
-  lines.push('GAME 4 -- JUNK');
+  // Game 4: 9 Point Game
+  lines.push('GAME 4 -- 9 POINT GAME' + (state.enableNinePoint ? '' : '  [OFF -- not counted in payout]'));
+  let npTotals = {};
+  const npParts = ninePointParticipantsResolved();
+  if(!state.enableNinePoint){
+    lines.push('  (turned off in Setup)');
+  } else if(npParts.length===3){
+    npTotals = ninePointPlayerTotals();
+    lines.push('  Players: ' + npParts.map(p=>p.name).join(', '));
+    lines.push('  Points per player (5-3-1 per hole, ties split, win-by-2 sweeps all 9):');
+    npParts.forEach(p=>{
+      const pts = npTotals[p.num]||0;
+      lines.push('  ' + padR(p.name,16) + padL(pts%1===0?pts:pts.toFixed(2),8) + ' pts   ' + fmtMoney(pts*state.unitNinePoint));
+    });
+  } else { lines.push('  (pick exactly 3 players on the 9 Point tab)'); }
+  lines.push('');
+
+  // Game 5: Junk
+  lines.push('GAME 5 -- JUNK');
   const jkTotals = junkTotals();
   const junkHoles = Object.keys(state.junks).filter(h => state.junks[h] && state.junks[h].events && state.junks[h].events.length);
   if(junkHoles.length){
@@ -844,8 +869,9 @@ function buildSummaryReport(){
     const mp = state.enableMatchPlay ? (mpTotals[p.num]||0)*state.unitMatch : 0;
     const bb = state.enableBestBall ? (bbTotals[p.num]||0)*state.unitBB : 0;
     const gold = (state.enablePotOfGold && pog2) ? (pog2.netByPlayer[p.num]||0) : 0;
+    const ninePt = state.enableNinePoint ? (npTotals[p.num]||0)*state.unitNinePoint : 0;
     const junk = jkTotals[p.num]||0;
-    const total = mp+bb+gold+junk;
+    const total = mp+bb+gold+ninePt+junk;
     lines.push(padR(p.name,16) + padL(fmtMoney(total),12));
   });
 
@@ -935,6 +961,74 @@ function computePotOfGold(){
   return { ap, N, front, back, all18, buyIn, netByPlayer };
 }
 
+/* ---------- 9 Point Game: field-low handicap, 5-3-1 per hole, tie-splitting, win-by-2 sweep ---------- */
+function ninePointParticipantsResolved(){
+  const ap = activePlayers();
+  if(Array.isArray(state.ninePointParticipants)){
+    const set = new Set(state.ninePointParticipants);
+    const filtered = ap.filter(p=>set.has(p.num));
+    if(filtered.length===3) return filtered;
+  }
+  return ap.slice(0,3); // default: first 3 active players
+}
+function ninePointHoleResult(holeIdx){
+  const parts = ninePointParticipantsResolved();
+  if(parts.length!==3) return null;
+  const low = Math.min(...parts.map(p=>Number(p.hcp)||0));
+  const si = course().si[holeIdx];
+  const entries = parts.map(p=>{
+    const gross = state.scores[p.idx][holeIdx];
+    if(gross==null) return { p, net:null };
+    const diff = (Number(p.hcp)||0) - low;
+    return { p, net: gross - strokesFor(diff, si) };
+  });
+  if(entries.some(e=>e.net===null)) return null; // wait for everyone to finish the hole
+
+  const sorted = [...entries].sort((a,b)=>a.net-b.net);
+  const n = sorted.length;
+  const posPoints = [5,3,1,0,0];
+  const mult = state.ninePointMultiplier[holeIdx] || 1;
+  const pointsByNum = {};
+  parts.forEach(p=>{ pointsByNum[p.num] = 0; });
+
+  // Twist: a sole leader who wins by 2+ strokes over the next-best score sweeps all 9 points.
+  let sweepWinner = null;
+  const bestScore = sorted[0].net;
+  const tiedForFirst = sorted.filter(e=>e.net===bestScore).length;
+  if(tiedForFirst===1){
+    const next = sorted.find(e=>e.net>bestScore);
+    if(next && (next.net - bestScore) >= 2) sweepWinner = sorted[0].p;
+  }
+
+  if(sweepWinner){
+    pointsByNum[sweepWinner.num] = 9*mult;
+  } else {
+    let i=0;
+    while(i<n){
+      let j=i;
+      while(j<n && sorted[j].net===sorted[i].net) j++;
+      let sum=0;
+      for(let k=i;k<j;k++) sum += (posPoints[k]||0);
+      const share = sum/(j-i);
+      for(let k=i;k<j;k++) pointsByNum[sorted[k].p.num] = share*mult;
+      i=j;
+    }
+  }
+  return { sorted, pointsByNum, sweepWinner, mult };
+}
+function ninePointAllHoles(){
+  return Array.from({length:18}, (_,h)=>ninePointHoleResult(h));
+}
+function ninePointPlayerTotals(){
+  const totals = {};
+  for(let i=1;i<=5;i++) totals[i]=0;
+  ninePointAllHoles().forEach(res=>{
+    if(!res) return;
+    for(const num in res.pointsByNum) totals[num] = (totals[num]||0) + res.pointsByNum[num];
+  });
+  return totals;
+}
+
 /* ---------- Junk: live closest-to-pin ledger, per hole ---------- */
 function junkTotals(){
   const totals = {};
@@ -994,6 +1088,7 @@ const TABS = [
   {id:'match', label:'MATCH PLAY', icon:`<circle cx="8" cy="12" r="4" fill="none" stroke-width="2"/><circle cx="16" cy="12" r="4" fill="none" stroke-width="2"/>`},
   {id:'bb', label:'BEST BALL', icon:`<circle cx="12" cy="9" r="4" fill="none" stroke-width="2"/><path d="M5 21c0-3 3-5 7-5s7 2 7 5" fill="none" stroke-width="2"/>`},
   {id:'gold', label:'GOLD', icon:`<path d="M5 9h14l-1.4 8.6a2 2 0 01-2 1.4H8.4a2 2 0 01-2-1.4L5 9z" fill="none" stroke-width="2"/><path d="M8 9V7a4 4 0 018 0v2" fill="none" stroke-width="2"/><circle cx="12" cy="13" r="1.6" fill="currentColor" stroke="none"/>`},
+  {id:'ninept', label:'9 POINT', icon:`<rect x="3" y="13" width="4.5" height="7" rx="1"/><rect x="9.75" y="8" width="4.5" height="12" rx="1"/><rect x="16.5" y="4" width="4.5" height="16" rx="1"/>`},
   {id:'pay', label:'PAYOUT', icon:`<path d="M3 8h18M3 8v10a2 2 0 002 2h14a2 2 0 002-2V8M3 8l2-4h14l2 4" fill="none" stroke-width="2"/>`},
 ];
 
@@ -1022,6 +1117,7 @@ function renderAll(){
   if(activeTab==='match') main.appendChild(renderMatch());
   if(activeTab==='bb') main.appendChild(renderBestBall());
   if(activeTab==='gold') main.appendChild(renderPotOfGold());
+  if(activeTab==='ninept') main.appendChild(renderNinePoint());
   if(activeTab==='pay') main.appendChild(renderPayout());
 }
 
@@ -1063,6 +1159,7 @@ function renderSetup(){
     { key:'enableMatchPlay', label:'Match Play (Nassau)', sub:'Front / Back / All 18, with auto-presses' },
     { key:'enableBestBall', label:'Best Ball', sub:'6-hole partner rounds' },
     { key:'enablePotOfGold', label:'Pot of Gold', sub:'Low net buy-in pot' },
+    { key:'enableNinePoint', label:'9 Point Game', sub:'5-3-1 points per hole, tie-splitting' },
   ];
   betDefs.forEach(def=>{
     const row = el(`
@@ -1084,24 +1181,57 @@ function renderSetup(){
 
   const pc = el(`<div class="card"></div>`);
   pc.innerHTML = `
-    <div class="section-label">Players</div>
-    <p class="hint">Leave a name blank if that player is sitting out today. Works with 4 or 5 players.</p>
+    <div class="section-label">Today's Players</div>
+    <p class="hint">Pick who's playing from your roster for each of the 5 slots. Leave a slot on "— sitting out —" if only 4 are playing. Handicap pre-fills from the roster but you can adjust it for the day.</p>
     <div id="playerRows"></div>
+    <div style="margin-top:6px;"><button class="link-btn" id="toggleRosterEditor">+ Manage player roster</button></div>
+    <div id="rosterEditorArea"></div>
   `;
   const prows = pc.querySelector('#playerRows');
+  // Make sure anyone already set as an active player (e.g. from before the roster existed) is in the roster.
+  let rosterChanged = false;
+  state.players.forEach(p=>{
+    if(p.name && !state.roster.some(r=>r.name===p.name)){
+      state.roster.push({ name:p.name, hcp:p.hcp });
+      rosterChanged = true;
+    }
+  });
+  if(rosterChanged) scheduleSave();
+  function rosterOptionsHtml(selectedName){
+    let html = `<option value="" ${!selectedName?'selected':''}>— sitting out —</option>`;
+    state.roster.forEach((r,ri)=>{
+      html += `<option value="${ri}" ${r.name===selectedName?'selected':''}>${r.name||'(unnamed)'}</option>`;
+    });
+    return html;
+  }
   state.players.forEach((p,i)=>{
     const row = el(`
       <div class="player-row">
         <div class="num">${i+1}</div>
-        <input type="text" placeholder="Player ${i+1} name" value="${p.name||''}">
-        <input type="number" placeholder="Hcp" value="${p.hcp===''?'':p.hcp}">
+        <select style="flex:2;">${rosterOptionsHtml(p.name)}</select>
+        <input type="number" placeholder="Hcp" value="${p.hcp===''?'':p.hcp}" style="flex:1;">
       </div>`);
-    const inputs = row.querySelectorAll('input');
-    const nameInput = inputs[0], hcpInput = inputs[1];
-    nameInput.oninput = ()=>{ state.players[i].name = nameInput.value; scheduleSave(); };
+    const sel = row.querySelector('select');
+    const hcpInput = row.querySelector('input');
+    sel.onchange = ()=>{
+      const idx = sel.value;
+      if(idx===''){ state.players[i].name = ''; state.players[i].hcp = ''; }
+      else{
+        const r = state.roster[Number(idx)];
+        state.players[i].name = r.name;
+        state.players[i].hcp = r.hcp;
+      }
+      scheduleSave(); renderAll();
+    };
     hcpInput.oninput = ()=>{ state.players[i].hcp = hcpInput.value===''? '' : Number(hcpInput.value); scheduleSave(); };
     prows.appendChild(row);
   });
+  let rosterEditorOpen = false;
+  pc.querySelector('#toggleRosterEditor').onclick = ()=>{
+    rosterEditorOpen = !rosterEditorOpen;
+    pc.querySelector('#toggleRosterEditor').textContent = rosterEditorOpen ? '– Hide player roster' : '+ Manage player roster';
+    renderRosterEditor(pc.querySelector('#rosterEditorArea'), rosterEditorOpen);
+  };
   wrap.appendChild(pc);
 
   const rc = el(`<div class="card"></div>`);
@@ -1224,6 +1354,36 @@ function renderHistoryCard(){
     });
   });
   return card;
+}
+
+function renderRosterEditor(container, open){
+  if(!open){ container.innerHTML=''; return; }
+  container.innerHTML = `<div class="divider-note">Your regular group. Add everyone who plays, even occasionally — you'll pick from this list each week above.</div>`;
+  state.roster.forEach((r,ri)=>{
+    const row = el(`
+      <div class="player-row">
+        <div class="num">${ri+1}</div>
+        <input type="text" placeholder="Name" value="${r.name||''}">
+        <input type="number" placeholder="Hcp" value="${r.hcp===''?'':r.hcp}">
+        <button class="btn-ghost btn-small" data-del="${ri}">×</button>
+      </div>`);
+    const inputs = row.querySelectorAll('input');
+    inputs[0].oninput = ()=>{ r.name = inputs[0].value; scheduleSave(); };
+    inputs[1].oninput = ()=>{ r.hcp = inputs[1].value===''? '' : Number(inputs[1].value); scheduleSave(); };
+    row.querySelector('[data-del]').onclick = ()=>{
+      state.roster.splice(ri,1);
+      scheduleSave(); renderAll();
+      setTimeout(()=>{ const b=document.getElementById('toggleRosterEditor'); if(b) b.click(); },0);
+    };
+    container.appendChild(row);
+  });
+  const addBtn = el(`<button class="btn-primary btn-block" style="margin-top:10px;">+ Add player to roster</button>`);
+  addBtn.onclick = ()=>{
+    state.roster.push({name:"", hcp:""});
+    scheduleSave(); renderAll();
+    setTimeout(()=>{ const b=document.getElementById('toggleRosterEditor'); if(b) b.click(); },0);
+  };
+  container.appendChild(addBtn);
 }
 
 function renderCourseEditor(container, open){
@@ -1836,6 +1996,124 @@ function renderPotOfGold(){
   return wrap;
 }
 
+/* ---------- 9 POINT GAME TAB ---------- */
+function renderNinePoint(){
+  const wrap = el(`<div></div>`);
+  if(!state.enableNinePoint){
+    wrap.appendChild(el(`<div class="off-banner">🔕 9 Point Game is turned OFF — excluded from Payout. Turn it back on in Setup.</div>`));
+  }
+  const ap = activePlayers();
+
+  const intro = el(`<div class="card"></div>`);
+  intro.innerHTML = `
+    <div class="section-label">9 Point Game</div>
+    <p class="hint">A 3-player game. Field-low handicap zeroed within that threesome. Each hole is worth 9 points: 5 for the low net score, 3 for 2nd, 1 for 3rd. Ties split the points for the positions they cover evenly. Twist: if the hole winner isn't tied and beats the next-best score by 2 or more strokes, they sweep all 9 points.</p>
+    <label class="field-label">$ per point</label>
+    <input type="number" id="npUnit" value="${state.unitNinePoint}" style="max-width:140px;">
+  `;
+  intro.querySelector('#npUnit').oninput = e=>{ state.unitNinePoint = Number(e.target.value)||0; scheduleSave(); renderAll(); };
+  wrap.appendChild(intro);
+
+  if(ap.length<3){
+    wrap.appendChild(el(`<div class="card empty-state">Add at least 3 players on Setup to run the 9 Point Game.</div>`));
+    return wrap;
+  }
+
+  const parts = ninePointParticipantsResolved();
+  const pickCard = el(`<div class="card"></div>`);
+  pickCard.innerHTML = `
+    <div class="section-label">Who's Playing</div>
+    <p class="hint">Pick exactly 3 -- this is always a 3-person game, even on a day with 4 or 5 out.</p>
+    <div id="npPlayerChips" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+  `;
+  const chipWrap = pickCard.querySelector('#npPlayerChips');
+  const selectedNums = parts.map(p=>p.num);
+  ap.forEach(p=>{
+    const inPick = selectedNums.includes(p.num);
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = inPick ? 'btn-primary btn-small' : 'btn-ghost btn-small';
+    chip.textContent = p.name;
+    chip.onclick = ()=>{
+      const current = new Set(ninePointParticipantsResolved().map(x=>x.num));
+      if(current.has(p.num)){
+        current.delete(p.num);
+      } else {
+        if(current.size>=3){ alert('9 Point Game is exactly 3 players -- deselect someone first.'); return; }
+        current.add(p.num);
+      }
+      state.ninePointParticipants = ap.map(x=>x.num).filter(n=>current.has(n));
+      scheduleSave(); renderAll();
+    };
+    chipWrap.appendChild(chip);
+  });
+  wrap.appendChild(pickCard);
+
+  if(parts.length!==3){
+    wrap.appendChild(el(`<div class="card empty-state">Pick exactly 3 players above to run the 9 Point Game.</div>`));
+    return wrap;
+  }
+
+  const multCard = el(`<div class="card"></div>`);
+  multCard.innerHTML = `
+    <div class="section-label">Point Multiplier by Hole</div>
+    <p class="hint">Turn any hole into a 2x or 3x points hole -- great for a par 3, the last hole, wherever your group wants extra action.</p>
+    <div class="nine-tag">Front</div>
+    <div class="hole-grid" id="npMultFront" style="grid-template-columns:repeat(9,1fr);"></div>
+    <div class="nine-tag">Back</div>
+    <div class="hole-grid" id="npMultBack" style="grid-template-columns:repeat(9,1fr);"></div>
+  `;
+  [['#npMultFront',0],['#npMultBack',9]].forEach(([sel,offset])=>{
+    const gridEl = multCard.querySelector(sel);
+    for(let k=0;k<9;k++){
+      const h = offset+k;
+      const s = document.createElement('select');
+      s.style.fontSize = '11px'; s.style.padding = '4px 2px';
+      [1,2,3].forEach(m=>{ const o=document.createElement('option'); o.value=m; o.textContent=m+'x'; s.appendChild(o); });
+      s.value = state.ninePointMultiplier[h] || 1;
+      s.onchange = ()=>{ state.ninePointMultiplier[h] = Number(s.value); scheduleSave(); renderAll(); };
+      gridEl.appendChild(s);
+    }
+  });
+  wrap.appendChild(multCard);
+
+  const holeResults = ninePointAllHoles();
+  const totals = ninePointPlayerTotals();
+
+  const standCard = el(`<div class="card"><div class="section-label">Standings</div></div>`);
+  const sortedParts = [...parts].sort((a,b)=> (totals[b.num]||0) - (totals[a.num]||0));
+  sortedParts.forEach(p=>{
+    const pts = totals[p.num]||0;
+    const dollars = pts*state.unitNinePoint;
+    const row = el(`<div class="payout-row">
+      <div><div class="payout-name">${p.name}</div><div class="payout-sub">${pts % 1 === 0 ? pts : pts.toFixed(2)} pts</div></div>
+      <div class="payout-amt ${dollars>0?'amt-pos':dollars<0?'amt-neg':'amt-zero'}">${fmtMoney(dollars)}</div>
+    </div>`);
+    standCard.appendChild(row);
+  });
+  wrap.appendChild(standCard);
+
+  const gridCard = el(`<div class="card gridview"></div>`);
+  gridCard.innerHTML = `<div class="section-label">Points by Hole</div><div class="scroll-hint">‹ swipe to see all 18 holes ›</div>`;
+  const scrollDiv = document.createElement('div');
+  scrollDiv.className = 'grid-scroll';
+  let thead = `<tr><th class="rowlabel">Hole</th>${Array.from({length:18},(_,i)=>`<th>${i+1}${state.ninePointMultiplier[i]>1?'<br><span style=\"color:var(--brass)\">'+state.ninePointMultiplier[i]+'x</span>':''}</th>`).join('')}</tr>`;
+  let rows = parts.map(p=>{
+    const cells = holeResults.map(res=>{
+      if(!res) return `<td>—</td>`;
+      const v = res.pointsByNum[p.num]||0;
+      return `<td>${v===0?'':(v%1===0?v:v.toFixed(2))}</td>`;
+    }).join('');
+    return `<tr><td class="rowlabel">${p.name}</td>${cells}</tr>`;
+  }).join('');
+  scrollDiv.innerHTML = `<table><thead>${thead}</thead><tbody>${rows}</tbody></table>`;
+  gridCard.appendChild(scrollDiv);
+  wrap.appendChild(gridCard);
+
+  return wrap;
+}
+
+
 function renderPayout(){
   const wrap = el(`<div></div>`);
   const ap = activePlayers();
@@ -1869,19 +2147,23 @@ function renderPayout(){
     const mpTotals = state.enableMatchPlay ? matchPlayPlayerTotals() : {};
     const bbTotals = (state.enableBestBall && ap.length>=4) ? bestBallPlayerTotals() : {};
     const pog = (state.enablePotOfGold && ap.length>=2) ? computePotOfGold() : null;
+    const npTotals = (state.enableNinePoint && ninePointParticipantsResolved().length===3) ? ninePointPlayerTotals() : {};
     const jkTotals = junkTotals();
     tc.innerHTML = `<div class="section-label">Net Payout</div>`;
     ap.forEach(p=>{
       const mpU = mpTotals[p.num]||0;
       const bbU = bbTotals[p.num]||0;
       const potD = pog ? (pog.netByPlayer[p.num]||0) : 0;
+      const npPts = npTotals[p.num]||0;
+      const npD = state.enableNinePoint ? npPts*state.unitNinePoint : 0;
       const jkD = jkTotals[p.num]||0;
       const mpD = mpU*state.unitMatch, bbD = bbU*state.unitBB;
-      const totalD = mpD+bbD+potD+jkD;
+      const totalD = mpD+bbD+potD+npD+jkD;
       const parts = [];
       parts.push(state.enableMatchPlay ? `Nassau ${mpU>0?'+':''}${mpU}u (F+B+18)` : `Nassau off`);
       parts.push(state.enableBestBall ? `Best Ball ${bbU>0?'+':''}${bbU}u` : `Best Ball off`);
       parts.push(state.enablePotOfGold ? `Gold ${fmtMoney(potD)}` : `Gold off`);
+      parts.push(state.enableNinePoint ? `9pt ${npPts%1===0?npPts:npPts.toFixed(2)}pts` : `9pt off`);
       parts.push(`Junk ${fmtMoney(jkD)}`);
       const row = el(`
         <div class="payout-row">
