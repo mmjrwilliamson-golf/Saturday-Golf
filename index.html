@@ -363,7 +363,7 @@ let activeTab = "setup";
 
 /* ---------- persistence: localStorage always; optional Firestore cloud sync on top ---------- */
 let saveTimer = null;
-let cloud = { db:null, code:null, ref:null, unsub:null, connected:false, applyingRemote:false };
+let cloud = { db:null, code:null, ref:null, unsub:null, connected:false, applyingRemote:false, lastSent:null };
 
 // Firestore doesn't support arrays-of-arrays, and state.scores is an array of 5 per-player
 // arrays -- so it gets flattened to an object ({p0:[...], p1:[...], ...}) for cloud storage only.
@@ -418,7 +418,9 @@ function scheduleSave(){
   saveTimer = setTimeout(()=>{
     try{ localStorage.setItem('stroke-and-press-state', JSON.stringify(state)); }catch(e){ console.warn('local save failed', e); }
     if(cloud.connected && cloud.ref && !cloud.applyingRemote){
-      cloud.ref.set(stateForCloud(state)).then(flashSaved).catch(e=>{ console.warn('cloud save failed', e); flashSaved(true); });
+      const payload = stateForCloud(state);
+      cloud.lastSent = payload;
+      cloud.ref.set(payload).then(flashSaved).catch(e=>{ console.warn('cloud save failed', e); flashSaved(true); });
     } else {
       flashSaved();
     }
@@ -432,6 +434,17 @@ function flashSaved(isError){
   setTimeout(()=>t.classList.remove('show'), 900);
 }
 
+function deepEqual(a,b){
+  if(a===b) return true;
+  if(typeof a!==typeof b) return false;
+  if(a===null || b===null) return a===b;
+  if(typeof a!=='object') return a===b;
+  if(Array.isArray(a)!==Array.isArray(b)) return false;
+  const aKeys = Object.keys(a), bKeys = Object.keys(b);
+  if(aKeys.length!==bKeys.length) return false;
+  for(const k of aKeys){ if(!deepEqual(a[k], b[k])) return false; }
+  return true;
+}
 function connectCloud(configObj, code){
   code = code.trim().toUpperCase();
   try{
@@ -441,15 +454,22 @@ function connectCloud(configObj, code){
     cloud.db = db; cloud.code = code; cloud.ref = ref;
     if(cloud.unsub) cloud.unsub();
     cloud.unsub = ref.onSnapshot(doc=>{
-      cloud.applyingRemote = true;
       if(doc.exists){
-        state = Object.assign(defaultState(), stateFromCloud(doc.data()));
+        const incoming = doc.data();
+        if(cloud.lastSent && deepEqual(incoming, cloud.lastSent)){
+          return; // this is just an echo of our own write -- nothing actually changed, don't disrupt the UI
+        }
+        cloud.applyingRemote = true;
+        state = Object.assign(defaultState(), stateFromCloud(incoming));
+        cloud.lastSent = incoming;
+        cloud.applyingRemote = false;
+        renderAll();
       } else {
         // first player to use this code -- seed it with current local state
-        ref.set(stateForCloud(state)).catch(e=>console.warn('seed failed', e));
+        const payload = stateForCloud(state);
+        cloud.lastSent = payload;
+        ref.set(payload).catch(e=>console.warn('seed failed', e));
       }
-      cloud.applyingRemote = false;
-      renderAll();
     }, err=>{
       console.warn('cloud listen error', err);
       cloud.connected = false;
@@ -465,7 +485,7 @@ function connectCloud(configObj, code){
 }
 function disconnectCloud(){
   if(cloud.unsub) cloud.unsub();
-  cloud = { db:null, code:null, ref:null, unsub:null, connected:false, applyingRemote:false };
+  cloud = { db:null, code:null, ref:null, unsub:null, connected:false, applyingRemote:false, lastSent:null };
   clearLocalCloudConfig();
   renderAll();
 }
