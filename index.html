@@ -882,9 +882,10 @@ function buildSummaryReport(){
   lines.push('');
 
   lines.push('=============================================');
-  lines.push('FINAL TALLY');
+  lines.push('NET PAYOUTS');
   lines.push('=============================================');
-  lines.push(padR('Player',16) + padL('Total $',12));
+  lines.push(padR('Player',16) + padL('Net $',12) + '   Payout');
+  const payoutTotals = [];
   ap.forEach(p=>{
     const mp = state.enableMatchPlay ? (mpTotals[p.num]||0)*state.unitMatch : 0;
     const bb = state.enableBestBall ? (bbTotals[p.num]||0)*state.unitBB : 0;
@@ -892,10 +893,42 @@ function buildSummaryReport(){
     const ninePt = state.enableNinePoint ? (npTotals[p.num]||0)*state.unitNinePoint : 0;
     const junk = jkTotals[p.num]||0;
     const total = mp+bb+gold+ninePt+junk;
-    lines.push(padR(p.name,16) + padL(fmtMoney(total),12));
+    payoutTotals.push({ name:p.name, amount: Math.round(total*100)/100 });
+    const rounded = Math.round(total*100)/100;
+    const label = rounded>0.005 ? 'RECEIVES ' + fmtMoney(rounded).replace('+','')
+                : rounded<-0.005 ? 'OWES ' + fmtMoney(Math.abs(rounded)).replace('+','')
+                : 'EVEN';
+    lines.push(padR(p.name,16) + padL(fmtMoney(total),12) + '   ' + label);
   });
 
+  const settlement = computeSettlement(payoutTotals);
+  lines.push('');
+  lines.push('Suggested settlement (fewest payments to even everyone out):');
+  if(settlement.length){
+    settlement.forEach(t=>{
+      lines.push(`  ${t.from} pays ${t.to}  $${t.amount.toFixed(2)}`);
+    });
+  } else {
+    lines.push('  Nobody owes anybody -- everyone is even.');
+  }
+
   return lines.join('\n');
+}
+
+function computeSettlement(playerTotals){
+  const creditors = playerTotals.filter(p=>p.amount>0.005).map(p=>({...p})).sort((a,b)=>b.amount-a.amount);
+  const debtors = playerTotals.filter(p=>p.amount<-0.005).map(p=>({name:p.name, amount:-p.amount})).sort((a,b)=>b.amount-a.amount);
+  const transactions = [];
+  let i=0, j=0;
+  while(i<debtors.length && j<creditors.length){
+    const pay = Math.min(debtors[i].amount, creditors[j].amount);
+    if(pay>0.005) transactions.push({ from:debtors[i].name, to:creditors[j].name, amount:Math.round(pay*100)/100 });
+    debtors[i].amount -= pay;
+    creditors[j].amount -= pay;
+    if(debtors[i].amount<=0.005) i++;
+    if(creditors[j].amount<=0.005) j++;
+  }
+  return transactions;
 }
 
 function downloadTextSummary(){
