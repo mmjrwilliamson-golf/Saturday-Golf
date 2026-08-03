@@ -1,0 +1,2451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Stroke &amp; Press</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<style>
+:root{
+  --paper:#F6F1E4;
+  --paper-2:#EFE8D6;
+  --ink:#1E2A22;
+  --ink-soft:#5B6459;
+  --fairway:#1B4332;
+  --fairway-2:#123024;
+  --turf:#2D6A4F;
+  --turf-light:#CFE3D6;
+  --brass:#A9791F;
+  --brass-light:#EFDFB3;
+  --flag:#B3261E;
+  --flag-light:#F4D9D6;
+  --line:#DCD2B8;
+  --white:#FFFFFF;
+  --radius:14px;
+  --shadow:0 2px 10px rgba(27,67,50,0.10);
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:'Work Sans',sans-serif;
+  min-height:100vh;
+  padding-bottom:78px;
+}
+.mono{font-family:'IBM Plex Mono',monospace;}
+.display{font-family:'Fraunces',serif;}
+
+/* ---------- Header ---------- */
+header.app-header{
+  background:linear-gradient(180deg,var(--fairway) 0%,var(--fairway-2) 100%);
+  color:var(--paper);
+  padding:18px 18px 22px;
+  border-bottom:3px solid var(--brass);
+  position:sticky; top:0; z-index:20;
+}
+header.app-header .title-row{display:flex;align-items:baseline;gap:8px;}
+header.app-header h1{
+  font-family:'Fraunces',serif; font-weight:700; font-size:26px; margin:0;
+  letter-spacing:0.2px;
+}
+header.app-header .flagicon{width:20px;height:20px;flex-shrink:0;}
+header.app-header .sub{
+  font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:1.5px;
+  text-transform:uppercase; color:var(--brass-light); margin-top:2px;
+}
+header.app-header .course-chip{
+  margin-top:12px; display:inline-flex; align-items:center; gap:8px;
+  background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.18);
+  padding:6px 12px; border-radius:999px; font-size:13px;
+}
+header.app-header .course-chip b{font-weight:600;}
+
+/* ---------- Tabs content ---------- */
+main{padding:16px 14px 24px; max-width:640px; margin:0 auto;}
+
+.card{
+  background:var(--white); border:1px solid var(--line); border-radius:var(--radius);
+  padding:16px; margin-bottom:14px; box-shadow:var(--shadow);
+}
+.section-label{
+  font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:1.6px;
+  text-transform:uppercase; color:var(--turf); font-weight:600; margin:0 0 10px;
+  display:flex; align-items:center; gap:8px;
+}
+.section-label::after{content:"";flex:1;height:1px;background:var(--line);}
+
+h2.display{font-size:19px;font-weight:600;margin:0 0 4px;}
+p.hint{font-size:12.5px; color:var(--ink-soft); margin:2px 0 12px; line-height:1.5;}
+
+/* form bits */
+label.field-label{display:block; font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-soft); margin-bottom:4px; font-weight:600;}
+input[type=text],input[type=number],select{
+  width:100%; padding:10px 11px; border:1.5px solid var(--line); border-radius:9px;
+  font-family:'Work Sans',sans-serif; font-size:15px; background:var(--paper); color:var(--ink);
+}
+select{appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9'%3E%3Cpath d='M1 1l6 6 6-6' stroke='%231B4332' stroke-width='2' fill='none'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 12px center; padding-right:32px;}
+input:focus,select:focus{outline:none; border-color:var(--turf); box-shadow:0 0 0 3px var(--turf-light);}
+input::placeholder{color:#B7AF9A;}
+
+.row{display:flex; gap:10px;}
+.row > *{flex:1;}
+.player-row{display:flex; gap:8px; align-items:center; margin-bottom:8px;}
+.player-row .num{
+  width:24px; height:24px; border-radius:50%; background:var(--fairway); color:var(--paper);
+  font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600;
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+}
+.player-row input[type=text]{flex:2;}
+.player-row input[type=number]{flex:1; text-align:center;}
+
+button{
+  font-family:'Work Sans',sans-serif; font-weight:600; border:none; cursor:pointer;
+  border-radius:10px; padding:11px 16px; font-size:14px;
+}
+.btn-primary{background:var(--fairway); color:var(--paper);}
+.btn-primary:active{background:var(--fairway-2);}
+.btn-ghost{background:transparent; color:var(--turf); border:1.5px solid var(--turf);}
+.btn-small{padding:7px 12px; font-size:12.5px; border-radius:8px;}
+.btn-block{width:100%;}
+.link-btn{background:none;border:none;color:var(--turf);font-weight:600;font-size:13px;padding:4px 0;text-decoration:underline;text-underline-offset:3px;}
+
+/* course grid */
+.hole-grid-label{
+  display:grid; grid-template-columns:repeat(9,1fr); gap:4px; margin-bottom:3px;
+}
+.hole-grid{
+  display:grid; grid-template-columns:repeat(9,1fr); gap:4px; margin-bottom:10px;
+}
+.hole-grid input, .hole-grid-label span{
+  text-align:center; padding:6px 2px; font-size:12px;
+}
+.hole-grid-label span{
+  font-family:'IBM Plex Mono',monospace; color:var(--ink-soft); font-size:10.5px;
+}
+.nine-tag{
+  font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--brass); font-weight:600;
+  text-transform:uppercase; letter-spacing:1px; margin:8px 0 4px;
+}
+.course-card{border:1.5px dashed var(--line); border-radius:10px; padding:12px; margin-bottom:10px;}
+.course-card.selected{border-color:var(--turf); background:var(--turf-light);}
+.course-card .cname{font-weight:600; font-size:15px;}
+.course-card .cmeta{font-size:11.5px; color:var(--ink-soft); font-family:'IBM Plex Mono',monospace;}
+
+/* ---------- Scorecard hole ticket ---------- */
+.hole-ticket{
+  background:var(--fairway); color:var(--paper); border-radius:var(--radius);
+  padding:18px; position:relative; margin-bottom:14px; box-shadow:var(--shadow);
+  background-image:radial-gradient(circle at 0 50%, var(--paper) 8px, transparent 9px),
+                    radial-gradient(circle at 100% 50%, var(--paper) 8px, transparent 9px);
+}
+.hole-ticket .htop{display:flex; justify-content:space-between; align-items:flex-start;}
+.hole-num-wrap{display:flex; align-items:baseline; gap:6px;}
+.hole-num{font-family:'Fraunces',serif; font-weight:700; font-size:44px; line-height:1;}
+.hole-word{font-family:'IBM Plex Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:var(--brass-light);}
+.hole-chips{display:flex; gap:6px;}
+.chip{
+  font-family:'IBM Plex Mono',monospace; font-size:11px; padding:4px 9px; border-radius:999px;
+  background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.22);
+}
+.hole-nav{display:flex; justify-content:space-between; align-items:center; margin-top:14px;}
+.nav-btn{
+  background:rgba(255,255,255,0.14); color:var(--paper); width:42px; height:42px; border-radius:50%;
+  font-size:18px; display:flex; align-items:center; justify-content:center;
+}
+.dots{display:flex; gap:3px; flex-wrap:wrap; max-width:200px; justify-content:center;}
+.dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,0.25);}
+.dot.filled{background:var(--brass-light);}
+.dot.current{background:var(--paper); width:8px;height:8px;}
+
+.score-entry-list{margin-top:14px;}
+.score-row{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  background:rgba(255,255,255,0.07); border-radius:10px; padding:9px 10px; margin-bottom:7px;
+}
+.score-row .pname{font-size:14px; font-weight:600; flex:1;}
+.score-row .stroke-tag{font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--brass-light); opacity:0.85;}
+.stepper{display:flex; align-items:center; gap:8px;}
+.stepper button{
+  width:30px; height:30px; border-radius:50%; background:rgba(255,255,255,0.18); color:var(--paper);
+  font-size:16px; padding:0; line-height:1;
+}
+.stepper .val{font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:600; width:26px; text-align:center;}
+
+.viewtoggle{display:flex; gap:8px; margin-bottom:12px;}
+.viewtoggle button{flex:1;}
+.grid-scroll{overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -16px; padding:0 16px;}
+.gridview table{border-collapse:collapse; font-family:'IBM Plex Mono',monospace; font-size:13px;}
+.gridview th,.gridview td{border:1px solid var(--line); padding:7px 2px; text-align:center; min-width:34px;}
+.gridview th{background:var(--paper-2); font-weight:600;}
+.gridview td input{border:none; background:transparent; width:100%; text-align:center; padding:2px; font-size:14px; font-family:'IBM Plex Mono',monospace;}
+.gridview .rowlabel{
+  text-align:left; font-family:'Work Sans',sans-serif; font-weight:600; padding-left:8px;
+  min-width:96px; position:sticky; left:0; background:var(--white); z-index:2;
+  box-shadow:2px 0 3px rgba(0,0,0,0.06);
+}
+.gridview th.rowlabel{background:var(--paper-2); z-index:3;}
+.gridview .totcol{min-width:44px; font-weight:600; background:var(--paper-2);}
+.scroll-hint{font-size:11px; color:var(--ink-soft); text-align:center; margin:0 0 8px; font-family:'IBM Plex Mono',monospace;}
+
+/* ---------- Match / bestball cards ---------- */
+.matchup{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
+.matchup .vs{font-family:'Fraunces',serif; font-weight:600; font-size:16px;}
+.matchup .vs .sep{color:var(--brass); font-size:13px; margin:0 6px; font-family:'IBM Plex Mono',monospace;}
+.status-pill{
+  font-family:'IBM Plex Mono',monospace; font-size:11px; padding:4px 10px; border-radius:999px; font-weight:600;
+}
+.pill-up{background:var(--turf-light); color:var(--turf);}
+.pill-down{background:var(--flag-light); color:var(--flag);}
+.pill-even{background:var(--paper-2); color:var(--ink-soft);}
+
+.nine-block{border-top:1px solid var(--line); padding-top:10px; margin-top:10px;}
+.nine-block .nine-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
+.nine-head .label{font-family:'IBM Plex Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-soft); font-weight:600;}
+.press-flag{
+  display:inline-flex; align-items:center; gap:4px; background:var(--flag-light); color:var(--flag);
+  font-family:'IBM Plex Mono',monospace; font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:999px;
+  animation:flagpop 0.35s ease;
+}
+@keyframes flagpop{from{transform:scale(0.7);opacity:0;}to{transform:scale(1);opacity:1;}}
+.press-flag svg{width:10px;height:10px;}
+.holebar{display:flex; gap:2px; margin:6px 0;}
+.holebar .hb{flex:1; height:6px; border-radius:3px; background:var(--paper-2);}
+.hb.win{background:var(--turf);}
+.hb.lose{background:var(--flag);}
+.hb.tie{background:var(--line);}
+.nine-units{font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:600; text-align:right; margin-top:4px;}
+.match-total{
+  margin-top:12px; padding-top:10px; border-top:2px solid var(--ink); display:flex; justify-content:space-between;
+  align-items:center; font-family:'Fraunces',serif; font-weight:600; font-size:16px;
+}
+
+.team-slot-row{display:flex; gap:8px; margin-bottom:8px;}
+.team-slot-row select{font-size:13px; padding:8px;}
+.team-label{font-family:'IBM Plex Mono',monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-soft); margin:10px 0 4px;}
+
+.payout-row{display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--line);}
+.payout-row:last-child{border-bottom:none;}
+.payout-name{font-weight:600; font-size:15px;}
+.payout-sub{font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--ink-soft);}
+.payout-amt{font-family:'IBM Plex Mono',monospace; font-size:19px; font-weight:600;}
+.amt-pos{color:var(--turf);}
+.amt-neg{color:var(--flag);}
+.amt-zero{color:var(--ink-soft);}
+
+.empty-state{text-align:center; padding:30px 16px; color:var(--ink-soft);}
+.empty-state svg{width:40px;height:40px;margin-bottom:10px;opacity:0.5;}
+
+/* ---------- Bottom nav ---------- */
+nav.tabbar{
+  position:fixed; bottom:0; left:0; right:0; background:var(--white); border-top:1px solid var(--line);
+  display:flex; z-index:30; padding-bottom:env(safe-area-inset-bottom);
+}
+nav.tabbar button{
+  flex:1; background:none; border:none; padding:9px 2px 8px; display:flex; flex-direction:column;
+  align-items:center; gap:3px; color:var(--ink-soft); border-radius:0;
+}
+nav.tabbar button svg{width:20px;height:20px;}
+nav.tabbar button .tlabel{font-size:10px; font-weight:600; font-family:'IBM Plex Mono',monospace; letter-spacing:0.3px;}
+nav.tabbar button.active{color:var(--fairway);}
+nav.tabbar button.active .tlabel{color:var(--fairway);}
+
+.save-tag{position:fixed; top:10px; right:12px; font-size:10px; font-family:'IBM Plex Mono',monospace; color:var(--brass-light); opacity:0; transition:opacity 0.3s; z-index:40;}
+.save-tag.show{opacity:1;}
+
+.divider-note{font-size:11.5px; color:var(--ink-soft); text-align:center; margin:10px 0;}
+
+/* ---------- Pot of Gold ---------- */
+.pot-header{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;}
+.pot-header .ptitle{font-family:'Fraunces',serif; font-weight:600; font-size:16px;}
+.pot-amount{font-family:'IBM Plex Mono',monospace; font-size:13px; color:var(--brass); font-weight:600;}
+.pending-badge{
+  font-family:'IBM Plex Mono',monospace; font-size:10px; font-weight:700; letter-spacing:0.5px;
+  background:var(--paper-2); color:var(--ink-soft); padding:3px 8px; border-radius:999px;
+}
+.lb-row{display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line);}
+.lb-row:last-child{border-bottom:none;}
+.lb-row.winner{background:var(--brass-light); margin:0 -16px; padding:8px 16px; border-radius:8px; border-bottom:none;}
+.lb-rank{width:20px; font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--ink-soft); text-align:center;}
+.lb-name{flex:1; font-weight:600; font-size:14px;}
+.lb-score{font-family:'IBM Plex Mono',monospace; font-size:15px; font-weight:600;}
+.lb-share{font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--turf); font-weight:600;}
+.buyin-strip{display:flex; gap:8px; margin-top:6px;}
+.buyin-strip > div{flex:1; text-align:center; background:var(--paper-2); border-radius:9px; padding:8px 4px;}
+.buyin-strip .blabel{font-family:'IBM Plex Mono',monospace; font-size:9.5px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.5px;}
+.buyin-strip input{text-align:center; padding:6px 4px; font-size:14px; margin-top:3px;}
+
+/* ---------- Bet on/off toggle ---------- */
+.bet-toggle-row{display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--line);}
+.bet-toggle-row:last-child{border-bottom:none;}
+.bet-toggle-name{font-weight:600; font-size:14.5px;}
+.bet-toggle-sub{font-size:11.5px; color:var(--ink-soft); margin-top:1px;}
+.switch{position:relative; width:46px; height:26px; flex-shrink:0; border-radius:999px; background:var(--line); border:none; padding:0; cursor:pointer; transition:background 0.2s;}
+.switch.on{background:var(--turf);}
+.switch .knob{position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:var(--white); transition:left 0.2s; box-shadow:0 1px 2px rgba(0,0,0,0.25);}
+.switch.on .knob{left:23px;}
+.off-banner{
+  display:flex; align-items:center; gap:8px; background:var(--paper-2); color:var(--ink-soft);
+  font-family:'IBM Plex Mono',monospace; font-size:11.5px; font-weight:600; padding:9px 12px;
+  border-radius:9px; margin-bottom:12px;
+}
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="title-row">
+    <svg class="flagicon" viewBox="0 0 24 24" fill="none"><path d="M5 21V4" stroke="#EFDFB3" stroke-width="2" stroke-linecap="round"/><path d="M5 4l13 4-13 4" fill="#B3261E"/></svg>
+    <h1>Stroke &amp; Press</h1>
+  </div>
+  <div class="sub">Saturday Money Games</div>
+  <div class="course-chip" id="courseChip">Loading…</div>
+</header>
+
+<div class="save-tag" id="saveTag">SAVED</div>
+
+<main id="main"></main>
+
+<nav class="tabbar" id="tabbar"></nav>
+
+<script>
+/* ============================================================
+   STATE
+   ============================================================ */
+const DEFAULT_PAR = [4,4,3,5,4,4,3,5,4, 4,4,3,5,4,4,3,5,4];
+const DEFAULT_SI  = [7,13,1,15,3,11,17,5,9, 8,14,2,16,4,12,18,6,10];
+
+function defaultState(){
+  return {
+    courses: [
+      { name:"Sample Course A", par:[...DEFAULT_PAR], si:[...DEFAULT_SI] },
+      { name:"Sample Course B", par:[4,5,3,4,4,5,3,4,4, 4,4,3,5,4,4,3,5,4], si:[11,3,17,9,5,1,15,13,7, 6,14,2,18,10,4,16,8,12] }
+    ],
+    courseIdx: 0,
+    roster: [
+      {name:"Player 1", hcp:8}, {name:"Player 2", hcp:12}, {name:"Player 3", hcp:5},
+      {name:"Player 4", hcp:18}, {name:"Player 5", hcp:10}
+    ],
+    players: [
+      {name:"Player 1", hcp:8}, {name:"Player 2", hcp:12}, {name:"Player 3", hcp:5},
+      {name:"Player 4", hcp:18}, {name:"Player 5", hcp:""}
+    ],
+    scores: [ Array(18).fill(null), Array(18).fill(null), Array(18).fill(null), Array(18).fill(null), Array(18).fill(null) ],
+    rounds: [ {a:[1,2],b:[3,4]}, {a:[1,3],b:[2,4]}, {a:[1,4],b:[2,3]} ],
+    boxRounds: [ {box:[1,2]}, {box:[3,4]}, {box:[5,1]} ],
+    bestBallFormat: '5',
+    enableMatchPlay: true,
+    enableBestBall: true,
+    enablePotOfGold: true,
+    enableNinePoint: true,
+    unitMatch: 5,
+    unitBB: 5,
+    potFront: 5,
+    potBack: 5,
+    potAll: 10,
+    junkAmount: 5,
+    junks: {},
+    potParticipants: null,
+    unitNinePoint: 1,
+    ninePointMultiplier: Array(18).fill(1),
+    ninePointParticipants: null,
+    enableIggarote: true,
+    unitIggarote: 25,
+    iggaroteParticipants: null,
+    currentHole: 1,
+    gridView: false
+  };
+}
+
+let state = defaultState();
+let activeTab = "setup";
+
+/* ---------- persistence: localStorage always; optional Firestore cloud sync on top ---------- */
+let saveTimer = null;
+let cloud = { db:null, code:null, ref:null, unsub:null, connected:false, applyingRemote:false, lastSent:null };
+
+// Firestore doesn't support arrays-of-arrays, and state.scores is an array of 5 per-player
+// arrays -- so it gets flattened to an object ({p0:[...], p1:[...], ...}) for cloud storage only.
+function scoresToFirestore(scores){
+  const obj = {};
+  scores.forEach((row,i)=>{ obj['p'+i] = row; });
+  return obj;
+}
+function scoresFromFirestore(obj){
+  const arr = [];
+  for(let i=0;i<5;i++){ arr.push((obj && obj['p'+i]) || Array(18).fill(null)); }
+  return arr;
+}
+function stateForCloud(s){
+  return { ...s, scores: scoresToFirestore(s.scores) };
+}
+function stateFromCloud(data){
+  return { ...data, scores: scoresFromFirestore(data.scores) };
+}
+
+function parseFirebaseConfig(raw){
+  // Firebase's console gives you a JS object literal (unquoted keys, sometimes trailing
+  // "const firebaseConfig = ... ;"), not strict JSON. Accept either.
+  let cleaned = raw.trim();
+  cleaned = cleaned.replace(/^\s*(export\s+)?(const|var|let)\s+\w+\s*=\s*/,'');
+  cleaned = cleaned.replace(/;\s*$/,'');
+  try{ return JSON.parse(cleaned); }
+  catch(e){ /* fall through */ }
+  try{ return (new Function('return (' + cleaned + ')'))(); }
+  catch(e){ return null; }
+}
+
+function localCloudConfig(){
+  try{
+    const cfgRaw = localStorage.getItem('sp-firebase-config');
+    const code = localStorage.getItem('sp-group-code');
+    if(!cfgRaw || !code) return null;
+    return { config: JSON.parse(cfgRaw), code: code.trim().toUpperCase() };
+  }catch(e){ return null; }
+}
+function saveLocalCloudConfig(configObj, code){
+  localStorage.setItem('sp-firebase-config', JSON.stringify(configObj));
+  localStorage.setItem('sp-group-code', code.trim().toUpperCase());
+}
+function clearLocalCloudConfig(){
+  localStorage.removeItem('sp-firebase-config');
+  localStorage.removeItem('sp-group-code');
+}
+
+function scheduleSave(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(()=>{
+    try{ localStorage.setItem('stroke-and-press-state', JSON.stringify(state)); }catch(e){ console.warn('local save failed', e); }
+    if(cloud.connected && cloud.ref && !cloud.applyingRemote){
+      const payload = stateForCloud(state);
+      cloud.lastSent = payload;
+      cloud.ref.set(payload).then(flashSaved).catch(e=>{ console.warn('cloud save failed', e); flashSaved(true); });
+    } else {
+      flashSaved();
+    }
+  }, 400);
+}
+function flashSaved(isError){
+  const t = document.getElementById('saveTag');
+  if(!t) return;
+  t.textContent = isError ? 'SYNC ERROR' : (cloud.connected ? 'SYNCED' : 'SAVED');
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 900);
+}
+
+function deepEqual(a,b){
+  if(a===b) return true;
+  if(typeof a!==typeof b) return false;
+  if(a===null || b===null) return a===b;
+  if(typeof a!=='object') return a===b;
+  if(Array.isArray(a)!==Array.isArray(b)) return false;
+  const aKeys = Object.keys(a), bKeys = Object.keys(b);
+  if(aKeys.length!==bKeys.length) return false;
+  for(const k of aKeys){ if(!deepEqual(a[k], b[k])) return false; }
+  return true;
+}
+function connectCloud(configObj, code){
+  code = code.trim().toUpperCase();
+  try{
+    if(!firebase.apps || !firebase.apps.length){ firebase.initializeApp(configObj); }
+    const db = firebase.firestore();
+    const ref = db.collection('rounds').doc(code);
+    cloud.db = db; cloud.code = code; cloud.ref = ref;
+    if(cloud.unsub) cloud.unsub();
+    cloud.unsub = ref.onSnapshot(doc=>{
+      if(doc.exists){
+        const incoming = doc.data();
+        if(cloud.lastSent && deepEqual(incoming, cloud.lastSent)){
+          return; // this is just an echo of our own write -- nothing actually changed, don't disrupt the UI
+        }
+        cloud.applyingRemote = true;
+        state = Object.assign(defaultState(), stateFromCloud(incoming));
+        cloud.lastSent = incoming;
+        cloud.applyingRemote = false;
+        renderAll();
+      } else {
+        // first player to use this code -- seed it with current local state
+        const payload = stateForCloud(state);
+        cloud.lastSent = payload;
+        ref.set(payload).catch(e=>console.warn('seed failed', e));
+      }
+    }, err=>{
+      console.warn('cloud listen error', err);
+      cloud.connected = false;
+      renderAll();
+    });
+    cloud.connected = true;
+    saveLocalCloudConfig(configObj, code);
+    return true;
+  }catch(e){
+    console.warn('connectCloud failed', e);
+    return false;
+  }
+}
+function disconnectCloud(){
+  if(cloud.unsub) cloud.unsub();
+  cloud = { db:null, code:null, ref:null, unsub:null, connected:false, applyingRemote:false, lastSent:null };
+  clearLocalCloudConfig();
+  renderAll();
+}
+
+function loadState(){
+  try{
+    const raw = localStorage.getItem('stroke-and-press-state');
+    if(raw){ state = Object.assign(defaultState(), JSON.parse(raw)); }
+  }catch(e){ /* no saved state yet, or storage unavailable (e.g. private browsing) */ }
+  const cfg = localCloudConfig();
+  if(cfg && window.firebase){
+    connectCloud(cfg.config, cfg.code);
+  }
+  renderAll();
+}
+
+/* ---------- Round history (archived when "Start New Round" is used while connected) ---------- */
+async function archiveCurrentRoundToHistory(){
+  if(!cloud.connected || !cloud.ref) return;
+  try{
+    const ts = new Date().toISOString();
+    await cloud.ref.collection('history').doc(ts).set({ ...stateForCloud(state), archivedAt: ts });
+  }catch(e){ console.warn('archive failed', e); }
+}
+async function fetchRoundHistory(){
+  if(!cloud.connected || !cloud.ref) return [];
+  try{
+    const snap = await cloud.ref.collection('history').orderBy('archivedAt','desc').limit(25).get();
+    return snap.docs.map(d=>stateFromCloud(d.data()));
+  }catch(e){ console.warn('fetch history failed', e); return []; }
+}
+
+
+/* ============================================================
+   GOLF LOGIC
+   ============================================================ */
+function strokesFor(diff, si){
+  const base = Math.floor(diff/18);
+  const rem = diff - 18*base;
+  return base + (si <= rem ? 1 : 0);
+}
+function activePlayers(){
+  return state.players.map((p,i)=>({...p, idx:i, num:i+1})).filter(p=>p.name && p.name.trim()!=="");
+}
+function course(){ return state.courses[state.courseIdx] || {par:DEFAULT_PAR, si:DEFAULT_SI, name:"—"}; }
+function lastPlayedIdx(results){
+  let last = -1;
+  for(let i=0;i<results.length;i++){ if(results[i]!==null) last = i; }
+  return last;
+}
+
+function computeNine(scoresA, scoresB, diff, lowIsA, holeIdxs){
+  const si = course().si;
+  const results = holeIdxs.map(h=>{
+    const gA = scoresA[h], gB = scoresB[h];
+    if(gA==null || gB==null) return null;
+    const sA = lowIsA ? 0 : strokesFor(diff, si[h]);
+    const sB = lowIsA ? strokesFor(diff, si[h]) : 0;
+    const netA = gA - sA, netB = gB - sB;
+    if(netA<netB) return 1;
+    if(netA>netB) return -1;
+    return 0;
+  });
+  const n = holeIdxs.length;
+  const holesPlayed = results.filter(r=>r!==null).length;
+  // Cascading auto-press: whenever an active bet stream reaches 2-down, a fresh
+  // press stream starts on the very next hole. A press can itself spawn another press.
+  const streams = [{ start:0, cum:0, triggered:false, cumHistory:[] }];
+  for(let h=0; h<n; h++){
+    const r = results[h] || 0;
+    for(const s of streams){
+      if(h >= s.start){
+        s.cum += r;
+        s.cumHistory[h] = s.cum;
+        if(!s.triggered && Math.abs(s.cum)===2){
+          s.triggered = true;
+          if(h+1 < n) streams.push({ start:h+1, cum:0, triggered:false, cumHistory:[] });
+        }
+      }
+    }
+  }
+  const sign = x=> x>0?1:x<0?-1:0;
+  const lastIdx = lastPlayedIdx(results);
+  streams.forEach(s=>{ s.finalCum = (lastIdx>=0 ? (s.cumHistory[lastIdx] ?? 0) : 0); s.result = sign(s.finalCum); });
+  const origResult = streams[0].result;
+  const numPresses = streams.length - 1;
+  const units = streams.reduce((a,s)=>a+s.result, 0);
+  return { results, streams, origResult, numPresses, units, holesPlayed, total:n,
+           liveCum: lastIdx>=0 ? (streams[0].cumHistory[lastIdx] ?? 0) : 0, pressActive: numPresses>0 };
+}
+function computeStraight(scoresA, scoresB, diff, lowIsA, holeIdxs){
+  const si = course().si;
+  const results = holeIdxs.map(h=>{
+    const gA = scoresA[h], gB = scoresB[h];
+    if(gA==null || gB==null) return null;
+    const sA = lowIsA ? 0 : strokesFor(diff, si[h]);
+    const sB = lowIsA ? strokesFor(diff, si[h]) : 0;
+    const netA = gA - sA, netB = gB - sB;
+    if(netA<netB) return 1;
+    if(netA>netB) return -1;
+    return 0;
+  });
+  let running = 0; const cum = results.map(r=> running += (r||0));
+  const holesPlayed = results.filter(r=>r!==null).length;
+  const sign = x=> x>0?1:x<0?-1:0;
+  const lastIdx = lastPlayedIdx(results);
+  const finalCum = lastIdx>=0 ? (cum[lastIdx] ?? 0) : 0;
+  return { results, cum, result: sign(finalCum), holesPlayed, total: holeIdxs.length, liveCum: finalCum };
+}
+function computeMatch(pA, pB){
+  const diff = Math.abs(pA.hcp - pB.hcp);
+  const lowIsA = pA.hcp <= pB.hcp;
+  const front = computeNine(state.scores[pA.idx], state.scores[pB.idx], diff, lowIsA, [0,1,2,3,4,5,6,7,8]);
+  const back  = computeNine(state.scores[pA.idx], state.scores[pB.idx], diff, lowIsA, [9,10,11,12,13,14,15,16,17]);
+  const all18 = computeStraight(state.scores[pA.idx], state.scores[pB.idx], diff, lowIsA, [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]);
+  const total = front.units + back.units + all18.result;
+  return { pA, pB, front, back, all18, total, diff, lowIsA };
+}
+function allMatches(){
+  const ap = activePlayers();
+  const out = [];
+  for(let i=0;i<ap.length;i++) for(let j=i+1;j<ap.length;j++) out.push(computeMatch(ap[i], ap[j]));
+  return out;
+}
+function fieldLowHcp(){
+  const ap = activePlayers();
+  if(!ap.length) return 0;
+  return Math.min(...ap.map(p=>Number(p.hcp)||0));
+}
+function computeBestBallMatch(teamANums, teamBNums, holeIdxs){
+  const low = fieldLowHcp();
+  const byNum = n => state.players[n-1] ? {...state.players[n-1], idx:n-1} : null;
+  const teamA = teamANums.map(byNum);
+  const teamB = teamBNums.map(byNum);
+  const netFor = (p,h)=>{
+    if(!p || !p.name) return null;
+    const gross = state.scores[p.idx][h];
+    if(gross==null) return null;
+    const diff = (Number(p.hcp)||0) - low;
+    return gross - strokesFor(diff, course().si[h]);
+  };
+  const results = holeIdxs.map(h=>{
+    const a1=netFor(teamA[0],h), a2=netFor(teamA[1],h), b1=netFor(teamB[0],h), b2=netFor(teamB[1],h);
+    const avals = [a1,a2].filter(v=>v!=null), bvals=[b1,b2].filter(v=>v!=null);
+    if(!avals.length || !bvals.length) return null;
+    const aBest = Math.min(...avals), bBest = Math.min(...bvals);
+    if(aBest<bBest) return 1;
+    if(aBest>bBest) return -1;
+    // Low ball tied -> the second ball on each team breaks the tie (only when both teams have two scores in).
+    if(avals.length===2 && bvals.length===2){
+      const aSecond = Math.max(...avals), bSecond = Math.max(...bvals);
+      if(aSecond<bSecond) return 1;
+      if(aSecond>bSecond) return -1;
+    }
+    return 0;
+  });
+  const n = holeIdxs.length;
+  // Any decisively-won hole (not tied) automatically starts a brand-new bet running to the
+  // end of the round — independent of who's up or down. Up to 5 extra bets + the original = 6 max.
+  const streams = [{ start:0, cum:0, cumHistory:[] }];
+  for(let h=0; h<n; h++){
+    const r = results[h];
+    for(const s of streams){
+      if(h >= s.start){ s.cum += (r||0); s.cumHistory[h] = s.cum; }
+    }
+    if(r!==null && r!==0 && h+1<n){
+      streams.push({ start:h+1, cum:0, cumHistory:[] });
+    }
+  }
+  const sign = x=> x>0?1:x<0?-1:0;
+  const holesPlayed = results.filter(r=>r!==null).length;
+  const lastIdx = lastPlayedIdx(results);
+  streams.forEach(s=>{ s.finalCum = lastIdx>=0 ? (s.cumHistory[lastIdx] ?? 0) : 0; s.result = sign(s.finalCum); });
+  const origResult = streams[0].result;
+  const numPresses = streams.length - 1;
+  const units = streams.reduce((a,s)=>a+s.result, 0);
+  return { teamA, teamB, results, streams, origResult, numPresses, units, holesPlayed, total:n,
+            liveCum: lastIdx>=0 ? (streams[0].cumHistory[lastIdx] ?? 0) : 0, pressActive: numPresses>0 };
+}
+function bestBallRound(roundIdx){
+  const rd = state.rounds[roundIdx];
+  const holeStart = roundIdx*6;
+  const holeIdxs = [0,1,2,3,4,5].map(k=>holeStart+k);
+  const m = computeBestBallMatch(rd.a, rd.b, holeIdxs);
+  return { ...m, holeStart };
+}
+/* ---------- 5-player "box" format: two players in the box play three matches
+   each 6-hole round, one against each pairing of the other three players. ---------- */
+function boxFieldFor(roundIdx){
+  const box = (state.boxRounds[roundIdx] && state.boxRounds[roundIdx].box) || [1,2];
+  const ap = activePlayers().map(p=>p.num);
+  const field = ap.filter(n=>!box.includes(n));
+  return { box, field };
+}
+function bestBallBoxRound(roundIdx){
+  const holeStart = roundIdx*6;
+  const holeIdxs = [0,1,2,3,4,5].map(k=>holeStart+k);
+  const { box, field } = boxFieldFor(roundIdx);
+  const pairs = [];
+  for(let i=0;i<field.length;i++) for(let j=i+1;j<field.length;j++) pairs.push([field[i],field[j]]);
+  const matches = pairs.map(pair => ({ opponents: pair, match: computeBestBallMatch(box, pair, holeIdxs) }));
+  return { box, field, matches, holeStart };
+}
+function useBoxFormat(){
+  return activePlayers().length===5 && state.bestBallFormat!=='4';
+}
+function bestBallPlayerTotals(){
+  const totals = {};
+  for(let i=1;i<=5;i++) totals[i]=0;
+  const ap = activePlayers();
+  if(useBoxFormat()){
+    for(let r=0;r<3;r++){
+      const { box, matches } = bestBallBoxRound(r);
+      matches.forEach(({opponents, match})=>{
+        const delta = match.units;
+        box.forEach(n=>{ totals[n]+=delta; });
+        opponents.forEach(n=>{ totals[n]-=delta; });
+      });
+    }
+  } else {
+    for(let r=0;r<3;r++){
+      const res = bestBallRound(r);
+      const rd = state.rounds[r];
+      const delta = res.units;
+      [rd.a[0],rd.a[1]].forEach(n=>{ if(n) totals[n]+=delta; });
+      [rd.b[0],rd.b[1]].forEach(n=>{ if(n) totals[n]-=delta; });
+    }
+  }
+  return totals;
+}
+function matchPlayPlayerTotals(){
+  const totals = {};
+  for(let i=1;i<=5;i++) totals[i]=0;
+  allMatches().forEach(m=>{
+    totals[m.pA.num]+=m.total;
+    totals[m.pB.num]-=m.total;
+  });
+  return totals;
+}
+
+/* ---------- End-of-round summary report (text, used for .txt, PDF, and email) ---------- */
+function nameOfNum(n){ return n ? ((state.players[n-1] && state.players[n-1].name) || ('Player '+n)) : '?'; }
+function padR(str, len){ str = String(str); return str.length>=len ? str.slice(0,len) : str + ' '.repeat(len-str.length); }
+function padL(str, len){ str = String(str); return str.length>=len ? str.slice(-len) : ' '.repeat(len-str.length) + str; }
+function fmtSigned(x){ return (x>0?'+':'') + x; }
+function dateSlug(){ return new Date().toISOString().slice(0,10); }
+
+function grossNetTable(){
+  const ap = activePlayers();
+  const c = course();
+  return ap.map(p=>{
+    const scores = state.scores[p.idx];
+    const grossFront = scores.slice(0,9).reduce((a,b)=>a+(b||0),0);
+    const grossBack = scores.slice(9,18).reduce((a,b)=>a+(b||0),0);
+    const hcp = Number(p.hcp)||0;
+    let netFront=0, netBack=0;
+    for(let h=0;h<9;h++){ if(scores[h]!=null) netFront += scores[h]-strokesFor(hcp, c.si[h]); }
+    for(let h=9;h<18;h++){ if(scores[h]!=null) netBack += scores[h]-strokesFor(hcp, c.si[h]); }
+    return { name:p.name, grossFront, grossBack, grossTotal:grossFront+grossBack,
+             netFront, netBack, netTotal: netFront+netBack };
+  });
+}
+
+function buildSummaryReport(){
+  const ap = activePlayers();
+  const c = course();
+  const lines = [];
+  const dateStr = new Date().toLocaleDateString(undefined, {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+  lines.push('STROKE & PRESS -- END OF ROUND SUMMARY');
+  lines.push(`Course: ${c.name}    Date: ${dateStr}`);
+  lines.push('');
+
+  lines.push('GROSS SCORES');
+  lines.push(padR('Player',16) + padL('Front',7) + padL('Back',7) + padL('Total',7));
+  const gn = grossNetTable();
+  gn.forEach(r=>{ lines.push(padR(r.name,16) + padL(r.grossFront,7) + padL(r.grossBack,7) + padL(r.grossTotal,7)); });
+  lines.push('');
+
+  lines.push('NET SCORES (each player\'s own full course handicap)');
+  lines.push(padR('Player',16) + padL('Front',7) + padL('Back',7) + padL('Total',7));
+  gn.forEach(r=>{ lines.push(padR(r.name,16) + padL(r.netFront,7) + padL(r.netBack,7) + padL(r.netTotal,7)); });
+  lines.push('');
+  lines.push('-------------------------------------------');
+  lines.push('BET SUMMARY');
+  lines.push('-------------------------------------------');
+  lines.push('');
+
+  // Game 1: Nassau / Match Play
+  lines.push('GAME 1 -- NASSAU (MATCH PLAY)' + (state.enableMatchPlay ? '' : '  [OFF -- not counted in payout]'));
+  const matches = allMatches();
+  if(!state.enableMatchPlay){
+    lines.push('  (turned off in Setup)');
+  } else if(matches.length){
+    matches.forEach(m=>{
+      lines.push(`${m.pA.name} vs ${m.pB.name}`);
+      lines.push(`  Front ${fmtSigned(m.front.units)}u${m.front.numPresses?` (${m.front.numPresses} press${m.front.numPresses===1?'':'es'})`:''}` +
+                 `   Back ${fmtSigned(m.back.units)}u${m.back.numPresses?` (${m.back.numPresses} press${m.back.numPresses===1?'':'es'})`:''}` +
+                 `   All18 ${fmtSigned(m.all18.result)}u`);
+      lines.push(`  Combined: ${fmtSigned(m.total)} unit(s) for ${m.pA.name}`);
+    });
+  } else { lines.push('  (not enough players)'); }
+  lines.push('');
+  const mpTotals = state.enableMatchPlay ? matchPlayPlayerTotals() : {};
+  if(state.enableMatchPlay){
+    lines.push('Nassau $ per player:');
+    ap.forEach(p=>{ lines.push('  ' + padR(p.name,16) + fmtMoney((mpTotals[p.num]||0)*state.unitMatch)); });
+    lines.push('');
+  }
+
+  // Game 2: Best Ball
+  lines.push('GAME 2 -- BEST BALL' + (state.enableBestBall ? '' : '  [OFF -- not counted in payout]'));
+  const bbBox = ap.length===5 && useBoxFormat();
+  if(!state.enableBestBall){
+    lines.push('  (turned off in Setup)');
+  } else if(ap.length>=4){
+    if(bbBox){
+      for(let r=0;r<3;r++){
+        const { box, matches: ms } = bestBallBoxRound(r);
+        lines.push(`Round ${r+1}: In the box -- ${box.map(nameOfNum).join(' & ')}`);
+        ms.forEach(({opponents, match})=>{
+          lines.push(`  vs ${opponents.map(nameOfNum).join(' & ')}: ${fmtSigned(match.units)}u${match.numPresses?` (${match.numPresses} bet${match.numPresses===1?'':'s'} added)`:''}`);
+        });
+      }
+    } else {
+      for(let r=0;r<3;r++){
+        const rd = state.rounds[r];
+        const res = bestBallRound(r);
+        lines.push(`Round ${r+1}: ${nameOfNum(rd.a[0])} & ${nameOfNum(rd.a[1])} vs ${nameOfNum(rd.b[0])} & ${nameOfNum(rd.b[1])}: ${fmtSigned(res.units)}u${res.numPresses?` (${res.numPresses} bet${res.numPresses===1?'':'s'} added)`:''}`);
+      }
+    }
+  } else { lines.push('  (needs at least 4 players)'); }
+  lines.push('');
+  const bbTotals = (state.enableBestBall && ap.length>=4) ? bestBallPlayerTotals() : {};
+  if(state.enableBestBall){
+    lines.push('Best Ball $ per player:');
+    ap.forEach(p=>{ lines.push('  ' + padR(p.name,16) + fmtMoney((bbTotals[p.num]||0)*state.unitBB)); });
+    lines.push('');
+  }
+
+  // Game 3: Pot of Gold
+  lines.push('GAME 3 -- POT OF GOLD' + (state.enablePotOfGold ? '' : '  [OFF -- not counted in payout]'));
+  const potParts = potParticipantsResolved();
+  let pog2 = null;
+  if(!state.enablePotOfGold){
+    lines.push('  (turned off in Setup)');
+  } else if(potParts.length>=2){
+    const pog = computePotOfGold();
+    pog2 = pog;
+    const potLine = (label, seg) => `${label} ($${seg.potTotal} pot): ` + (seg.complete
+      ? (seg.winners.length ? seg.winners.map(nameOfNum).join(' & ') + ' win ' + fmtMoney(seg.share) : 'no result')
+      : 'in progress');
+    lines.push('  ' + potLine('Front nine', pog.front));
+    lines.push('  ' + potLine('Back nine', pog.back));
+    lines.push('  ' + potLine('All 18', pog.all18));
+    lines.push('');
+    lines.push('Pot of Gold $ per player:');
+    pog.ap.forEach(p=>{ lines.push('  ' + padR(p.name,16) + fmtMoney(pog.netByPlayer[p.num]||0)); });
+  } else { lines.push('  (needs at least 2 players in the pot)'); }
+  lines.push('');
+
+  // Game 4: 9 Point Game
+  lines.push('GAME 4 -- 9 POINT GAME' + (state.enableNinePoint ? '' : '  [OFF -- not counted in payout]'));
+  let npTotals = {};
+  const npParts = ninePointParticipantsResolved();
+  if(!state.enableNinePoint){
+    lines.push('  (turned off in Setup)');
+  } else if(npParts.length===3){
+    npTotals = ninePointPlayerTotals();
+    lines.push('  Players: ' + npParts.map(p=>p.name).join(', '));
+    lines.push('  Points per player (5-3-1 per hole, ties split, win-by-2 sweeps all 9):');
+    npParts.forEach(p=>{
+      const pts = npTotals[p.num]||0;
+      lines.push('  ' + padR(p.name,16) + padL(pts%1===0?pts:pts.toFixed(2),8) + ' pts   ' + fmtMoney(pts*state.unitNinePoint));
+    });
+  } else { lines.push('  (pick exactly 3 players on the 9 Point tab)'); }
+  lines.push('');
+
+  // Game 5: Junk
+  // Game 5: Iggarote
+  lines.push('GAME 5 -- IGGAROTE' + (state.enableIggarote ? '' : '  [OFF -- not counted in payout]'));
+  const iggParts = iggaroteParticipantsResolved();
+  let iggTotals2 = {};
+  if(!state.enableIggarote){
+    lines.push('  (turned off in Setup)');
+  } else if(iggParts.length>=2){
+    iggTotals2 = iggarotePlayerTotals();
+    lines.push('  Gross, no strokes. Even par (or better) on holes 7-9 and 16-18 to beat an opponent;');
+    lines.push('   7+ hcp gap requires the low-handicap player to shoot under par against that opponent.');
+    allIggaroteMatches().forEach(m=>{
+      const segTxt = (seg) => !seg ? 'not finished' : (seg.result>0? m.pA.name+' wins' : seg.result<0? m.pB.name+' wins' : 'push') + ` (par ${seg.par}: ${m.pA.name} ${seg.grossA}, ${m.pB.name} ${seg.grossB})`;
+      lines.push(`  ${m.pA.name} vs ${m.pB.name}: Holes7-9 ${segTxt(m.seg1)} | Holes16-18 ${segTxt(m.seg2)}`);
+    });
+    lines.push('');
+    lines.push('Iggarote $ per player:');
+    iggParts.forEach(p=>{ lines.push('  ' + padR(p.name,16) + fmtMoney(iggTotals2[p.num]||0)); });
+  } else { lines.push('  (needs at least 2 players)'); }
+  lines.push('');
+
+  // Game 6: Junk
+  lines.push('GAME 6 -- JUNK');
+  const jkTotals = junkTotals();
+  const junkHoles = Object.keys(state.junks).filter(h => state.junks[h] && state.junks[h].events && state.junks[h].events.length);
+  if(junkHoles.length){
+    junkHoles.sort((a,b)=>Number(a)-Number(b)).forEach(hStr=>{
+      const jk = state.junks[hStr];
+      lines.push(`  Hole ${Number(hStr)+1}:`);
+      jk.events.forEach(ev=>{
+        lines.push(`    ${nameOfNum(ev.shooter)} owes 1 junk each to ${ev.winners.map(nameOfNum).join(', ')}`);
+      });
+    });
+    lines.push('');
+    lines.push('Junk $ per player:');
+    ap.forEach(p=>{ lines.push('  ' + padR(p.name,16) + fmtMoney(jkTotals[p.num]||0)); });
+  } else { lines.push('  (no junk bets logged)'); }
+  lines.push('');
+
+  lines.push('=============================================');
+  lines.push('NET PAYOUTS');
+  lines.push('=============================================');
+  lines.push(padR('Player',16) + padL('Net $',12) + '   Payout');
+  const payoutTotals = [];
+  ap.forEach(p=>{
+    const mp = state.enableMatchPlay ? (mpTotals[p.num]||0)*state.unitMatch : 0;
+    const bb = state.enableBestBall ? (bbTotals[p.num]||0)*state.unitBB : 0;
+    const gold = (state.enablePotOfGold && pog2) ? (pog2.netByPlayer[p.num]||0) : 0;
+    const ninePt = state.enableNinePoint ? (npTotals[p.num]||0)*state.unitNinePoint : 0;
+    const iggy = state.enableIggarote ? (iggTotals2[p.num]||0) : 0;
+    const junk = jkTotals[p.num]||0;
+    const total = mp+bb+gold+ninePt+iggy+junk;
+    payoutTotals.push({ name:p.name, amount: Math.round(total*100)/100 });
+    const rounded = Math.round(total*100)/100;
+    const label = rounded>0.005 ? 'RECEIVES ' + fmtMoney(rounded).replace('+','')
+                : rounded<-0.005 ? 'OWES ' + fmtMoney(Math.abs(rounded)).replace('+','')
+                : 'EVEN';
+    lines.push(padR(p.name,16) + padL(fmtMoney(total),12) + '   ' + label);
+  });
+
+  const settlement = computeSettlement(payoutTotals);
+  lines.push('');
+  lines.push('Suggested settlement (fewest payments to even everyone out):');
+  if(settlement.length){
+    settlement.forEach(t=>{
+      lines.push(`  ${t.from} pays ${t.to}  $${t.amount.toFixed(2)}`);
+    });
+  } else {
+    lines.push('  Nobody owes anybody -- everyone is even.');
+  }
+
+  return lines.join('\n');
+}
+
+function computeSettlement(playerTotals){
+  const creditors = playerTotals.filter(p=>p.amount>0.005).map(p=>({...p})).sort((a,b)=>b.amount-a.amount);
+  const debtors = playerTotals.filter(p=>p.amount<-0.005).map(p=>({name:p.name, amount:-p.amount})).sort((a,b)=>b.amount-a.amount);
+  const transactions = [];
+  let i=0, j=0;
+  while(i<debtors.length && j<creditors.length){
+    const pay = Math.min(debtors[i].amount, creditors[j].amount);
+    if(pay>0.005) transactions.push({ from:debtors[i].name, to:creditors[j].name, amount:Math.round(pay*100)/100 });
+    debtors[i].amount -= pay;
+    creditors[j].amount -= pay;
+    if(debtors[i].amount<=0.005) i++;
+    if(creditors[j].amount<=0.005) j++;
+  }
+  return transactions;
+}
+
+function downloadTextSummary(){
+  const text = buildSummaryReport();
+  const blob = new Blob([text], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `Round_Summary_${dateSlug()}.txt`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function downloadPdfSummary(){
+  if(!window.jspdf){ alert('The PDF library did not load -- check your internet connection and try again.'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'letter' });
+  doc.setFont('courier','normal');
+  doc.setFontSize(9);
+  const lines = buildSummaryReport().split('\n');
+  const marginX = 40, marginTop = 50, lineHeight = 12;
+  const pageHeight = doc.internal.pageSize.getHeight();
+  let y = marginTop;
+  lines.forEach(line=>{
+    if(y > pageHeight - 40){ doc.addPage(); y = marginTop; }
+    doc.text(line, marginX, y);
+    y += lineHeight;
+  });
+  doc.save(`Round_Summary_${dateSlug()}.pdf`);
+}
+function emailSummary(){
+  const text = buildSummaryReport();
+  const subject = encodeURIComponent('Stroke & Press -- Round Summary');
+  const body = encodeURIComponent(text);
+  window.location.href = `mailto:?subject=${subject}&body=${body}`;
+}
+
+/* ---------- Pot of Gold: low net front / low net back / low net 18, full handicap ---------- */
+function netTotalFor(p, holeIdxs){
+  const si = course().si;
+  const hcp = Number(p.hcp)||0;
+  let sum = 0;
+  for(const h of holeIdxs){
+    const g = state.scores[p.idx][h];
+    if(g==null) return null; // incomplete
+    sum += g - strokesFor(hcp, si[h]);
+  }
+  return sum;
+}
+function potSegment(ap, holeIdxs, potTotal){
+  const entries = ap.map(p=>({p, net: netTotalFor(p, holeIdxs)}));
+  const complete = entries.every(e=>e.net!==null);
+  let winners = [];
+  if(complete && entries.length){
+    const min = Math.min(...entries.map(e=>e.net));
+    winners = entries.filter(e=>e.net===min).map(e=>e.p.num);
+  }
+  const share = (complete && winners.length) ? potTotal/winners.length : 0;
+  return { entries, complete, winners, potTotal, share };
+}
+function potParticipantsResolved(){
+  const ap = activePlayers();
+  if(Array.isArray(state.potParticipants)){
+    const set = new Set(state.potParticipants);
+    const filtered = ap.filter(p=>set.has(p.num));
+    if(filtered.length) return filtered;
+  }
+  return ap; // default: everyone playing today is in the pot
+}
+function computePotOfGold(){
+  const ap = potParticipantsResolved();
+  const N = ap.length;
+  const front = potSegment(ap, [0,1,2,3,4,5,6,7,8], state.potFront*N);
+  const back  = potSegment(ap, [9,10,11,12,13,14,15,16,17], state.potBack*N);
+  const all18 = potSegment(ap, [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17], state.potAll*N);
+  const buyIn = state.potFront + state.potBack + state.potAll;
+  const netByPlayer = {};
+  ap.forEach(p=>{
+    let net = 0;
+    if(front.complete) net += (front.winners.includes(p.num)? front.share:0) - state.potFront;
+    if(back.complete)  net += (back.winners.includes(p.num)? back.share:0) - state.potBack;
+    if(all18.complete) net += (all18.winners.includes(p.num)? all18.share:0) - state.potAll;
+    netByPlayer[p.num] = net;
+  });
+  return { ap, N, front, back, all18, buyIn, netByPlayer };
+}
+
+/* ---------- 9 Point Game: field-low handicap, 5-3-1 per hole, tie-splitting, win-by-2 sweep ---------- */
+function ninePointParticipantsResolved(){
+  const ap = activePlayers();
+  if(Array.isArray(state.ninePointParticipants)){
+    const set = new Set(state.ninePointParticipants);
+    const filtered = ap.filter(p=>set.has(p.num));
+    if(filtered.length===3) return filtered;
+  }
+  return ap.slice(0,3); // default: first 3 active players
+}
+function ninePointHoleResult(holeIdx){
+  const parts = ninePointParticipantsResolved();
+  if(parts.length!==3) return null;
+  const low = Math.min(...parts.map(p=>Number(p.hcp)||0));
+  const si = course().si[holeIdx];
+  const entries = parts.map(p=>{
+    const gross = state.scores[p.idx][holeIdx];
+    if(gross==null) return { p, net:null };
+    const diff = (Number(p.hcp)||0) - low;
+    return { p, net: gross - strokesFor(diff, si) };
+  });
+  if(entries.some(e=>e.net===null)) return null; // wait for everyone to finish the hole
+
+  const sorted = [...entries].sort((a,b)=>a.net-b.net);
+  const n = sorted.length;
+  const posPoints = [5,3,1,0,0];
+  const mult = state.ninePointMultiplier[holeIdx] || 1;
+  const pointsByNum = {};
+  parts.forEach(p=>{ pointsByNum[p.num] = 0; });
+
+  // Twist: a sole leader who wins by 2+ strokes over the next-best score sweeps all 9 points.
+  let sweepWinner = null;
+  const bestScore = sorted[0].net;
+  const tiedForFirst = sorted.filter(e=>e.net===bestScore).length;
+  if(tiedForFirst===1){
+    const next = sorted.find(e=>e.net>bestScore);
+    if(next && (next.net - bestScore) >= 2) sweepWinner = sorted[0].p;
+  }
+
+  if(sweepWinner){
+    pointsByNum[sweepWinner.num] = 9*mult;
+  } else {
+    let i=0;
+    while(i<n){
+      let j=i;
+      while(j<n && sorted[j].net===sorted[i].net) j++;
+      let sum=0;
+      for(let k=i;k<j;k++) sum += (posPoints[k]||0);
+      const share = sum/(j-i);
+      for(let k=i;k<j;k++) pointsByNum[sorted[k].p.num] = share*mult;
+      i=j;
+    }
+  }
+  return { sorted, pointsByNum, sweepWinner, mult };
+}
+function ninePointAllHoles(){
+  return Array.from({length:18}, (_,h)=>ninePointHoleResult(h));
+}
+function ninePointPlayerTotals(){
+  const totals = {};
+  for(let i=1;i<=5;i++) totals[i]=0;
+  ninePointAllHoles().forEach(res=>{
+    if(!res) return;
+    for(const num in res.pointsByNum) totals[num] = (totals[num]||0) + res.pointsByNum[num];
+  });
+  return totals;
+}
+
+/* ---------- Iggarote: gross, holes 7-9 & 16-18, even-par target, 7+ hcp gap modifier ---------- */
+function iggaroteParticipantsResolved(){
+  const ap = activePlayers();
+  if(Array.isArray(state.iggaroteParticipants)){
+    const set = new Set(state.iggaroteParticipants);
+    const filtered = ap.filter(p=>set.has(p.num));
+    if(filtered.length>=2) return filtered;
+  }
+  return ap; // default: everyone playing today is in
+}
+function sumGross(idx, holeIdxs){
+  let sum=0;
+  for(const h of holeIdxs){ const g=state.scores[idx][h]; if(g==null) return null; sum+=g; }
+  return sum;
+}
+function iggaroteSegment(pA, pB, holeIdxs){
+  const c = course();
+  const par = holeIdxs.reduce((s,h)=>s+c.par[h],0);
+  const grossA = sumGross(pA.idx, holeIdxs);
+  const grossB = sumGross(pB.idx, holeIdxs);
+  if(grossA==null || grossB==null) return null;
+  const hcpA = Number(pA.hcp)||0, hcpB = Number(pB.hcp)||0;
+  const hcpDiff = Math.abs(hcpA - hcpB);
+  const lowIsA = hcpA <= hcpB;
+  const bigGap = hcpDiff >= 7;
+  const targetA = (bigGap && lowIsA) ? par-1 : par;
+  const targetB = (bigGap && !lowIsA) ? par-1 : par;
+  const aHits = grossA <= targetA;
+  const bHits = grossB <= targetB;
+  let result = 0;
+  if(aHits && !bHits) result = 1;
+  else if(bHits && !aHits) result = -1;
+  return { par, grossA, grossB, targetA, targetB, hcpDiff, bigGap, lowIsA, aHits, bHits, result };
+}
+function allIggaroteMatches(){
+  const parts = iggaroteParticipantsResolved();
+  const out = [];
+  for(let i=0;i<parts.length;i++){
+    for(let j=i+1;j<parts.length;j++){
+      const pA = parts[i], pB = parts[j];
+      out.push({ pA, pB, seg1: iggaroteSegment(pA,pB,[6,7,8]), seg2: iggaroteSegment(pA,pB,[15,16,17]) });
+    }
+  }
+  return out;
+}
+function iggarotePlayerTotals(){
+  const totals = {};
+  for(let i=1;i<=5;i++) totals[i]=0;
+  allIggaroteMatches().forEach(m=>{
+    [m.seg1, m.seg2].forEach(seg=>{
+      if(!seg) return;
+      totals[m.pA.num] += seg.result*state.unitIggarote;
+      totals[m.pB.num] -= seg.result*state.unitIggarote;
+    });
+  });
+  return totals;
+}
+
+/* ---------- Junk: live closest-to-pin ledger, per hole ---------- */
+function junkTotals(){
+  const totals = {};
+  for(let i=1;i<=5;i++) totals[i]=0;
+  for(const h in state.junks){
+    const jk = state.junks[h];
+    if(!jk || !jk.events) continue;
+    jk.events.forEach(ev=>{
+      const n = ev.winners.length;
+      totals[ev.shooter] = (totals[ev.shooter]||0) - n*state.junkAmount;
+      ev.winners.forEach(w=>{ totals[w] = (totals[w]||0) + state.junkAmount; });
+    });
+  }
+  return totals;
+}
+function junkHoleNet(holeIdx){
+  const jk = state.junks[holeIdx];
+  const totals = {};
+  if(!jk || !jk.events) return totals;
+  jk.events.forEach(ev=>{
+    totals[ev.shooter] = (totals[ev.shooter]||0) - ev.winners.length*state.junkAmount;
+    ev.winners.forEach(w=>{ totals[w] = (totals[w]||0) + state.junkAmount; });
+  });
+  return totals;
+}
+
+/* ============================================================
+   RENDER HELPERS
+   ============================================================ */
+function el(html){ const d=document.createElement('div'); d.innerHTML=html.trim(); return d.firstChild; }
+function fmtMoney(v){
+  const rounded = Math.round(v*100)/100;
+  const sign = rounded>0?'+':rounded<0?'-':'';
+  return sign+'$'+Math.abs(rounded).toFixed(rounded%1===0?0:2);
+}
+function pillClass(units){ return units>0?'pill-up':units<0?'pill-down':'pill-even'; }
+function pillText(units, upWord, downWord){
+  if(units>0) return `${units} ${upWord}`;
+  if(units<0) return `${Math.abs(units)} ${downWord}`;
+  return 'ALL SQ';
+}
+const FLAG_SVG = `<svg viewBox="0 0 24 24" fill="none"><path d="M5 21V4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M5 5l12 3-12 3z" fill="currentColor"/></svg>`;
+
+function holeBar(results){
+  return `<div class="holebar">${results.map(r=>{
+    const kind = r===1?'win':r===-1?'lose':r===0?'tie':'';
+    return `<div class="hb ${kind}"></div>`;
+  }).join('')}</div>`;
+}
+
+/* ============================================================
+   TABS
+   ============================================================ */
+const TABS = [
+  {id:'setup', label:'SETUP', icon:`<circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" fill="none" stroke-width="2"/>`},
+  {id:'card', label:'CARD', icon:`<rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke-width="2"/><path d="M7 10h4M7 14h7" stroke-width="2"/>`},
+  {id:'match', label:'MATCH PLAY', icon:`<circle cx="8" cy="12" r="4" fill="none" stroke-width="2"/><circle cx="16" cy="12" r="4" fill="none" stroke-width="2"/>`},
+  {id:'bb', label:'BEST BALL', icon:`<circle cx="12" cy="9" r="4" fill="none" stroke-width="2"/><path d="M5 21c0-3 3-5 7-5s7 2 7 5" fill="none" stroke-width="2"/>`},
+  {id:'gold', label:'GOLD', icon:`<path d="M5 9h14l-1.4 8.6a2 2 0 01-2 1.4H8.4a2 2 0 01-2-1.4L5 9z" fill="none" stroke-width="2"/><path d="M8 9V7a4 4 0 018 0v2" fill="none" stroke-width="2"/><circle cx="12" cy="13" r="1.6" fill="currentColor" stroke="none"/>`},
+  {id:'ninept', label:'9 POINT', icon:`<rect x="3" y="13" width="4.5" height="7" rx="1"/><rect x="9.75" y="8" width="4.5" height="12" rx="1"/><rect x="16.5" y="4" width="4.5" height="16" rx="1"/>`},
+  {id:'iggy', label:'IGGY', icon:`<circle cx="12" cy="12" r="8" fill="none" stroke-width="2"/><circle cx="12" cy="12" r="4.5" fill="none" stroke-width="2"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>`},
+  {id:'pay', label:'PAYOUT', icon:`<path d="M3 8h18M3 8v10a2 2 0 002 2h14a2 2 0 002-2V8M3 8l2-4h14l2 4" fill="none" stroke-width="2"/>`},
+];
+
+function renderTabbar(){
+  const bar = document.getElementById('tabbar');
+  bar.innerHTML = TABS.map(t=>`
+    <button data-tab="${t.id}" class="${activeTab===t.id?'active':''}">
+      <svg viewBox="0 0 24 24" stroke="currentColor" fill="currentColor">${t.icon}</svg>
+      <span class="tlabel">${t.label}</span>
+    </button>`).join('');
+  bar.querySelectorAll('button').forEach(b=>b.onclick=()=>{ activeTab=b.dataset.tab; renderAll(); });
+}
+
+function renderCourseChip(){
+  const c = course();
+  document.getElementById('courseChip').innerHTML = `⛳ <b>${c.name}</b> &nbsp;·&nbsp; Par ${c.par.reduce((a,b)=>a+b,0)}`;
+}
+
+function renderAll(){
+  renderTabbar();
+  renderCourseChip();
+  const main = document.getElementById('main');
+  main.innerHTML = '';
+  if(activeTab==='setup') main.appendChild(renderSetup());
+  if(activeTab==='card') main.appendChild(renderCard());
+  if(activeTab==='match') main.appendChild(renderMatch());
+  if(activeTab==='bb') main.appendChild(renderBestBall());
+  if(activeTab==='gold') main.appendChild(renderPotOfGold());
+  if(activeTab==='ninept') main.appendChild(renderNinePoint());
+  if(activeTab==='iggy') main.appendChild(renderIggarote());
+  if(activeTab==='pay') main.appendChild(renderPayout());
+}
+
+/* ---------- SETUP TAB ---------- */
+function rosterOptionsHtml(selectedName){
+  let html = `<option value="" ${!selectedName?'selected':''}>— sitting out —</option>`;
+  state.roster.forEach((r,ri)=>{
+    html += `<option value="${ri}" ${r.name===selectedName?'selected':''}>${r.name||'(unnamed)'}</option>`;
+  });
+  return html;
+}
+function renderSetup(){
+  const wrap = el(`<div></div>`);
+
+  const cc = el(`<div class="card"></div>`);
+  cc.innerHTML = `
+    <div class="section-label">Course</div>
+    <label class="field-label">Select Course</label>
+    <select id="courseSelect"></select>
+    <div style="margin-top:12px;">
+      <button class="link-btn" id="toggleCourseEditor">+ Add / edit courses</button>
+    </div>
+    <div id="courseEditorArea"></div>
+  `;
+  const sel = cc.querySelector('#courseSelect');
+  state.courses.forEach((c,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=c.name; sel.appendChild(o); });
+  sel.value = state.courseIdx;
+  sel.onchange = ()=>{ state.courseIdx = Number(sel.value); scheduleSave(); renderCourseChip(); };
+
+  let editorOpen = false;
+  cc.querySelector('#toggleCourseEditor').onclick = ()=>{
+    editorOpen = !editorOpen;
+    cc.querySelector('#toggleCourseEditor').textContent = editorOpen ? '– Hide course editor' : '+ Add / edit courses';
+    renderCourseEditor(cc.querySelector('#courseEditorArea'), editorOpen);
+  };
+  wrap.appendChild(cc);
+
+  const betsCard = el(`<div class="card"></div>`);
+  betsCard.innerHTML = `
+    <div class="section-label">Bets</div>
+    <p class="hint">Turn a bet off to leave it out of the Payout tab and the end-of-round summary entirely — nothing from that game will count toward anyone's total.</p>
+    <div id="betToggleRows"></div>
+  `;
+  const rowsWrap = betsCard.querySelector('#betToggleRows');
+  const betDefs = [
+    { key:'enableMatchPlay', label:'Match Play (Nassau)', sub:'Front / Back / All 18, with auto-presses' },
+    { key:'enableBestBall', label:'Best Ball', sub:'6-hole partner rounds' },
+    { key:'enablePotOfGold', label:'Pot of Gold', sub:'Low net buy-in pot' },
+    { key:'enableNinePoint', label:'9 Point Game', sub:'5-3-1 points per hole, tie-splitting' },
+    { key:'enableIggarote', label:'Iggarote', sub:'$25 gross bet, holes 7-9 & 16-18' },
+  ];
+  betDefs.forEach(def=>{
+    const row = el(`
+      <div class="bet-toggle-row">
+        <div>
+          <div class="bet-toggle-name">${def.label}</div>
+          <div class="bet-toggle-sub">${def.sub}</div>
+        </div>
+        <button type="button" class="switch ${state[def.key]?'on':''}"><span class="knob"></span></button>
+      </div>`);
+    const btn = row.querySelector('.switch');
+    btn.onclick = ()=>{
+      state[def.key] = !state[def.key];
+      scheduleSave(); renderAll();
+    };
+    rowsWrap.appendChild(row);
+  });
+  wrap.appendChild(betsCard);
+
+  const pc = el(`<div class="card"></div>`);
+  pc.innerHTML = `
+    <div class="section-label">Today's Players</div>
+    <p class="hint">Pick who's playing from your roster for each of the 5 slots. Leave a slot on "— sitting out —" if only 4 are playing. Handicap pre-fills from the roster but you can adjust it for the day.</p>
+    <div id="playerRows"></div>
+    <div style="margin-top:6px;"><button class="link-btn" id="toggleRosterEditor">+ Manage player roster</button></div>
+    <div id="rosterEditorArea"></div>
+  `;
+  const prows = pc.querySelector('#playerRows');
+  // Make sure anyone already set as an active player (e.g. from before the roster existed) is in the roster.
+  let rosterChanged = false;
+  state.players.forEach(p=>{
+    if(p.name && !state.roster.some(r=>r.name===p.name)){
+      state.roster.push({ name:p.name, hcp:p.hcp });
+      rosterChanged = true;
+    }
+  });
+  if(rosterChanged) scheduleSave();
+  state.players.forEach((p,i)=>{
+    const row = el(`
+      <div class="player-row">
+        <div class="num">${i+1}</div>
+        <select style="flex:2;">${rosterOptionsHtml(p.name)}</select>
+        <input type="number" placeholder="Hcp" value="${p.hcp===''?'':p.hcp}" style="flex:1;">
+      </div>`);
+    const sel = row.querySelector('select');
+    const hcpInput = row.querySelector('input');
+    sel.onchange = ()=>{
+      const idx = sel.value;
+      if(idx===''){ state.players[i].name = ''; state.players[i].hcp = ''; }
+      else{
+        const r = state.roster[Number(idx)];
+        state.players[i].name = r.name;
+        state.players[i].hcp = r.hcp;
+      }
+      scheduleSave(); renderAll();
+    };
+    hcpInput.oninput = ()=>{ state.players[i].hcp = hcpInput.value===''? '' : Number(hcpInput.value); scheduleSave(); };
+    prows.appendChild(row);
+  });
+  let rosterEditorOpen = false;
+  pc.querySelector('#toggleRosterEditor').onclick = ()=>{
+    rosterEditorOpen = !rosterEditorOpen;
+    pc.querySelector('#toggleRosterEditor').textContent = rosterEditorOpen ? '– Hide player roster' : '+ Manage player roster';
+    renderRosterEditor(pc.querySelector('#rosterEditorArea'), rosterEditorOpen);
+  };
+  wrap.appendChild(pc);
+
+  const rc = el(`<div class="card"></div>`);
+  rc.innerHTML = `
+    <div class="section-label">Round</div>
+    <p class="hint">Ready to play again? This clears everyone's hole-by-hole scores and any Junk bets, but keeps your players, handicaps, course and Best Ball team setup — no need to re-enter anything.</p>
+    <button class="btn-ghost btn-block" id="newRoundBtn" style="border-color:var(--flag); color:var(--flag);">Start New Round (clear scores)</button>
+  `;
+  rc.querySelector('#newRoundBtn').onclick = async ()=>{
+    const archiveNote = cloud.connected ? ' This round will be saved to History first.' : '';
+    if(confirm('Clear all scores for a new round?' + archiveNote + ' Players, handicaps, course and teams will stay as they are.')){
+      if(cloud.connected){ await archiveCurrentRoundToHistory(); }
+      state.scores = state.players.map(()=>Array(18).fill(null));
+      state.junks = {};
+      state.currentHole = 1;
+      scheduleSave();
+      renderAll();
+    }
+  };
+  wrap.appendChild(rc);
+
+  wrap.appendChild(renderCloudSyncCard());
+  if(cloud.connected){ wrap.appendChild(renderHistoryCard()); }
+
+  return wrap;
+}
+
+function renderCloudSyncCard(){
+  const card = el(`<div class="card"></div>`);
+  if(cloud.connected){
+    card.innerHTML = `
+      <div class="section-label">Cloud Sync</div>
+      <p class="hint">🟢 Connected — this device is syncing live with group code <b>${cloud.code}</b>. Anyone who enters the same code sees and edits the same round in real time.</p>
+      <button class="btn-ghost btn-block" id="disconnectBtn">Disconnect this device</button>
+    `;
+    card.querySelector('#disconnectBtn').onclick = ()=>{
+      if(confirm('Disconnect from cloud sync? This device will go back to saving locally only.')){
+        disconnectCloud();
+      }
+    };
+  } else {
+    card.innerHTML = `
+      <div class="section-label">Cloud Sync</div>
+      <p class="hint">Optional: connect this device to a shared online round so everyone's phone sees the same live scores. Requires a free Firebase project (one-time setup, takes about 5 minutes) — tap below for step-by-step instructions. Once it's set up, every other player just enters the same Group Code and your Firebase config below; no project creation needed twice.</p>
+      <button class="link-btn" id="toggleCloudHelp">+ How do I set this up?</button>
+      <div id="cloudHelpArea" style="display:none; margin:10px 0;"></div>
+      <label class="field-label" style="margin-top:10px;">Group Code</label>
+      <input type="text" id="groupCodeInput" placeholder="e.g. SATURDAY-GUYS" style="text-transform:uppercase;">
+      <label class="field-label" style="margin-top:10px;">Firebase Config (paste the whole object from your Firebase console)</label>
+      <textarea id="fbConfigInput" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...", ...}' style="width:100%; min-height:90px; padding:10px 11px; border:1.5px solid var(--line); border-radius:9px; font-family:'IBM Plex Mono',monospace; font-size:12px; background:var(--paper); color:var(--ink);"></textarea>
+      <button class="btn-primary btn-block" id="connectBtn" style="margin-top:10px;">Connect</button>
+      <p class="hint" id="connectError" style="color:var(--flag); display:none; margin-top:8px;"></p>
+    `;
+    const helpBtn = card.querySelector('#toggleCloudHelp');
+    const helpArea = card.querySelector('#cloudHelpArea');
+    helpBtn.onclick = ()=>{
+      const open = helpArea.style.display !== 'none';
+      helpArea.style.display = open ? 'none' : 'block';
+      helpBtn.textContent = open ? '+ How do I set this up?' : '– Hide instructions';
+      if(!open){
+        helpArea.innerHTML = `
+          <div class="divider-note" style="text-align:left; line-height:1.7;">
+            1. Go to <b>console.firebase.google.com</b> and sign in with any Google account.<br>
+            2. Click <b>Add project</b>, give it any name, and finish the wizard (defaults are fine).<br>
+            3. On the project page, click the <b>&lt;/&gt;</b> (web) icon to add a web app. Name it anything and click Register.<br>
+            4. Firebase shows you a code block starting with <b>const firebaseConfig = {...}</b> — copy just the <b>{...}</b> part and paste it into the box below.<br>
+            5. In the left sidebar, go to <b>Build → Firestore Database → Create database</b>. Choose <b>Start in test mode</b> and pick any location.<br>
+            6. In Firestore, open the <b>Rules</b> tab and paste:<br>
+            <span class="mono" style="display:block; background:var(--paper-2); padding:8px; border-radius:6px; margin:4px 0; font-size:11px;">rules_version = '2';<br>service cloud.firestore {<br>&nbsp;&nbsp;match /databases/{db}/documents {<br>&nbsp;&nbsp;&nbsp;&nbsp;match /rounds/{code} {<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;allow read, write: if true;<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;match /history/{entry} { allow read, write: if true; }<br>&nbsp;&nbsp;&nbsp;&nbsp;}<br>&nbsp;&nbsp;}<br>}</span>
+            then click <b>Publish</b>.<br>
+            7. Pick a Group Code below (anything, e.g. your group's name) and hit Connect. Send the same config + code to your buddies once, and everyone's set from then on.<br>
+            <b>Note:</b> this makes the round readable/writable by anyone who has the code — fine for a friendly game, but don't reuse it for anything sensitive.
+          </div>`;
+      }
+    };
+    card.querySelector('#connectBtn').onclick = ()=>{
+      const code = card.querySelector('#groupCodeInput').value.trim();
+      const raw = card.querySelector('#fbConfigInput').value.trim();
+      const errEl = card.querySelector('#connectError');
+      errEl.style.display = 'none';
+      if(!code){ errEl.textContent = 'Enter a group code.'; errEl.style.display='block'; return; }
+      if(!window.firebase){ errEl.textContent = 'Firebase library did not load -- check your internet connection.'; errEl.style.display='block'; return; }
+      let cfg = parseFirebaseConfig(raw);
+      if(!cfg || typeof cfg !== 'object' || !cfg.projectId){
+        errEl.textContent = 'Couldn\'t read that config -- paste the whole { ... } object exactly as Firebase gave it to you (it\'s fine if the keys aren\'t in quotes).';
+        errEl.style.display='block'; return;
+      }
+      const ok = connectCloud(cfg, code);
+      if(!ok){ errEl.textContent = 'Could not connect -- double check the config and try again.'; errEl.style.display='block'; return; }
+      renderAll();
+    };
+  }
+  return card;
+}
+
+function renderHistoryCard(){
+  const card = el(`<div class="card"></div>`);
+  card.innerHTML = `<div class="section-label">History</div><p class="hint">Past rounds saved under group code ${cloud.code}.</p><div id="historyList" class="hint">Loading…</div>`;
+  const listEl = card.querySelector('#historyList');
+  fetchRoundHistory().then(rounds=>{
+    if(!rounds.length){ listEl.textContent = 'No past rounds yet -- they show up here after you use "Start New Round."'; return; }
+    listEl.innerHTML = '';
+    rounds.forEach(snap=>{
+      const dateStr = snap.archivedAt ? new Date(snap.archivedAt).toLocaleDateString(undefined,{weekday:'short', year:'numeric', month:'short', day:'numeric'}) : 'Unknown date';
+      const courseName = (snap.courses && snap.courses[snap.courseIdx] && snap.courses[snap.courseIdx].name) || '—';
+      const row = el(`<div class="payout-row"><div><div class="payout-name">${dateStr}</div><div class="payout-sub">${courseName}</div></div><button class="btn-ghost btn-small">View</button></div>`);
+      row.querySelector('button').onclick = ()=>{
+        const liveState = state;
+        state = snap;
+        const text = buildSummaryReport();
+        state = liveState;
+        const blob = new Blob([text], {type:'text/plain'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `Round_Summary_${dateStr.replace(/[, ]+/g,'_')}.txt`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+      listEl.appendChild(row);
+    });
+  });
+  return card;
+}
+
+function renderRosterEditor(container, open){
+  if(!open){ container.innerHTML=''; return; }
+  container.innerHTML = `<div class="divider-note">Your regular group. Add everyone who plays, even occasionally — you'll pick from this list each week above.</div>`;
+  state.roster.forEach((r,ri)=>{
+    const row = el(`
+      <div class="player-row">
+        <div class="num">${ri+1}</div>
+        <input type="text" placeholder="Name" value="${r.name||''}">
+        <input type="number" placeholder="Hcp" value="${r.hcp===''?'':r.hcp}">
+        <button class="btn-ghost btn-small" data-del="${ri}">×</button>
+      </div>`);
+    const inputs = row.querySelectorAll('input');
+    inputs[0].oninput = ()=>{
+      const oldName = r.name;
+      const newName = inputs[0].value;
+      if(oldName){
+        state.players.forEach(p=>{ if(p.name===oldName) p.name = newName; });
+      }
+      r.name = newName;
+      scheduleSave();
+      const dropdowns = document.querySelectorAll('#playerRows select');
+      dropdowns.forEach((sel,i)=>{ sel.innerHTML = rosterOptionsHtml(state.players[i].name); });
+    };
+    inputs[1].oninput = ()=>{ r.hcp = inputs[1].value===''? '' : Number(inputs[1].value); scheduleSave(); };
+    row.querySelector('[data-del]').onclick = ()=>{
+      state.roster.splice(ri,1);
+      scheduleSave(); renderAll();
+      setTimeout(()=>{ const b=document.getElementById('toggleRosterEditor'); if(b) b.click(); },0);
+    };
+    container.appendChild(row);
+  });
+  const addBtn = el(`<button class="btn-primary btn-block" style="margin-top:10px;">+ Add player to roster</button>`);
+  addBtn.onclick = ()=>{
+    state.roster.push({name:"", hcp:""});
+    scheduleSave(); renderAll();
+    setTimeout(()=>{ const b=document.getElementById('toggleRosterEditor'); if(b) b.click(); },0);
+  };
+  container.appendChild(addBtn);
+}
+
+function renderCourseEditor(container, open){
+  if(!open){ container.innerHTML=''; return; }
+  container.innerHTML = `<div class="divider-note">Edit an existing course below, or add a new one.</div>`;
+  state.courses.forEach((c,ci)=>{
+    const card = el(`<div class="course-card ${ci===state.courseIdx?'selected':''}"></div>`);
+    card.innerHTML = `
+      <input type="text" value="${c.name}" style="font-weight:600;font-size:15px;border:none;background:none;padding:2px 0;width:100%;">
+      <div class="nine-tag">Par — Front</div>
+      <div class="hole-grid" data-kind="par" data-nine="0"></div>
+      <div class="nine-tag">Par — Back</div>
+      <div class="hole-grid" data-kind="par" data-nine="1"></div>
+      <div class="nine-tag">Stroke Index — Front (1=hardest)</div>
+      <div class="hole-grid" data-kind="si" data-nine="0"></div>
+      <div class="nine-tag">Stroke Index — Back</div>
+      <div class="hole-grid" data-kind="si" data-nine="1"></div>
+      <div style="margin-top:8px;"><button class="btn-ghost btn-small" data-del="${ci}">Remove course</button></div>
+    `;
+    const nameInput = card.querySelector('input[type=text]');
+    nameInput.oninput = ()=>{ c.name = nameInput.value; scheduleSave(); renderCourseChip();
+      const sel = document.getElementById('courseSelect'); if(sel) sel.options[ci].textContent = c.name; };
+    card.querySelectorAll('.hole-grid').forEach(grid=>{
+      const kind = grid.dataset.kind, nine = Number(grid.dataset.nine);
+      for(let k=0;k<9;k++){
+        const h = nine*9+k;
+        const inp = document.createElement('input');
+        inp.type='number'; inp.value = c[kind][h];
+        inp.oninput = ()=>{ c[kind][h] = Number(inp.value)||0; scheduleSave(); if(ci===state.courseIdx) renderCourseChip(); };
+        grid.appendChild(inp);
+      }
+    });
+    const delBtn = card.querySelector('[data-del]');
+    delBtn.onclick = ()=>{
+      if(state.courses.length<=1){ alert('Keep at least one course.'); return; }
+      state.courses.splice(ci,1);
+      if(state.courseIdx>=state.courses.length) state.courseIdx = state.courses.length-1;
+      scheduleSave(); renderAll();
+    };
+    container.appendChild(card);
+  });
+  const addBtn = el(`<button class="btn-primary btn-block" style="margin-top:6px;">+ New blank course</button>`);
+  addBtn.onclick = ()=>{
+    state.courses.push({name:"New Course", par:Array(18).fill(4), si:[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]});
+    scheduleSave(); renderAll(); activeTab='setup';
+    setTimeout(()=>{ const b=document.getElementById('toggleCourseEditor'); if(b) b.click(); },0);
+  };
+  container.appendChild(addBtn);
+}
+
+/* ---------- SCORECARD TAB ---------- */
+function renderCard(){
+  const wrap = el(`<div></div>`);
+  const toggle = el(`
+    <div class="viewtoggle">
+      <button class="${!state.gridView?'btn-primary':'btn-ghost'}" id="btnHoleView">Hole-by-hole</button>
+      <button class="${state.gridView?'btn-primary':'btn-ghost'}" id="btnGridView">Full grid</button>
+    </div>`);
+  toggle.querySelector('#btnHoleView').onclick = ()=>{ state.gridView=false; renderAll(); };
+  toggle.querySelector('#btnGridView').onclick = ()=>{ state.gridView=true; renderAll(); };
+  wrap.appendChild(toggle);
+
+  const ap = activePlayers();
+  if(!ap.length){
+    wrap.appendChild(el(`<div class="card empty-state">Add at least one player on the Setup tab to start entering scores.</div>`));
+    return wrap;
+  }
+
+  if(state.gridView){
+    wrap.appendChild(renderGridView(ap));
+  } else {
+    wrap.appendChild(renderHoleTicket(ap));
+    if(ap.length>=2){
+      const hIdx = state.currentHole-1;
+      const isPar3 = course().par[hIdx] === 3;
+      wrap.appendChild(renderJunkCard(ap, hIdx, isPar3));
+    }
+  }
+  return wrap;
+}
+
+function renderHoleTicket(ap){
+  const h = state.currentHole;
+  const hIdx = h-1;
+  const c = course();
+  const ticket = el(`<div class="hole-ticket"></div>`);
+  ticket.innerHTML = `
+    <div class="htop">
+      <div class="hole-num-wrap">
+        <div class="hole-num">${h}</div>
+        <div class="hole-word">of 18</div>
+      </div>
+      <div class="hole-chips">
+        <div class="chip">PAR ${c.par[hIdx]}</div>
+        <div class="chip">SI ${c.si[hIdx]}</div>
+      </div>
+    </div>
+    <div class="score-entry-list" id="scoreEntryList"></div>
+    <div class="hole-nav">
+      <button class="nav-btn" id="prevHole">‹</button>
+      <div class="dots" id="dots"></div>
+      <button class="nav-btn" id="nextHole">›</button>
+    </div>
+  `;
+  const list = ticket.querySelector('#scoreEntryList');
+  ap.forEach(p=>{
+    const val = state.scores[p.idx][hIdx];
+    const row = el(`
+      <div class="score-row">
+        <div class="pname">${p.name}</div>
+        <div class="stepper">
+          <button class="minus">–</button>
+          <div class="val">${val==null?'–':val}</div>
+          <button class="plus">+</button>
+        </div>
+      </div>`);
+    const valEl = row.querySelector('.val');
+    row.querySelector('.minus').onclick = ()=>{
+      let v = state.scores[p.idx][hIdx]; v = (v==null? c.par[hIdx] : v) - 1; if(v<1) v=1;
+      state.scores[p.idx][hIdx]=v; valEl.textContent=v; scheduleSave();
+    };
+    row.querySelector('.plus').onclick = ()=>{
+      let v = state.scores[p.idx][hIdx]; v = (v==null? c.par[hIdx] : v) + 1; if(v>15) v=15;
+      state.scores[p.idx][hIdx]=v; valEl.textContent=v; scheduleSave();
+    };
+    list.appendChild(row);
+  });
+  const dots = ticket.querySelector('#dots');
+  for(let i=1;i<=18;i++){
+    const anyScore = ap.some(p=>state.scores[p.idx][i-1]!=null);
+    const d = document.createElement('div');
+    d.className = 'dot'+(anyScore?' filled':'')+(i===h?' current':'');
+    dots.appendChild(d);
+  }
+  ticket.querySelector('#prevHole').onclick = ()=>{ state.currentHole = h>1? h-1 : 18; renderAll(); };
+  ticket.querySelector('#nextHole').onclick = ()=>{ state.currentHole = h<18? h+1 : 1; renderAll(); };
+  return ticket;
+}
+
+function renderGridView(ap){
+  const c = course();
+  const card = el(`<div class="card gridview"></div>`);
+  let thead = `<tr><th class="rowlabel">Hole</th>${Array.from({length:18},(_,i)=>`<th>${i+1}</th>`).join('')}<th class="totcol">Tot</th></tr>`;
+  thead += `<tr><th class="rowlabel">Par</th>${c.par.map(p=>`<th>${p}</th>`).join('')}<th class="totcol">${c.par.reduce((a,b)=>a+b,0)}</th></tr>`;
+  let rows = ap.map(p=>{
+    const scores = state.scores[p.idx];
+    const tot = scores.reduce((a,b)=>a+(b||0),0);
+    const cells = scores.map((s,h)=>`<td><input type="number" inputmode="numeric" data-p="${p.idx}" data-h="${h}" value="${s==null?'':s}"></td>`).join('');
+    return `<tr><td class="rowlabel">${p.name}</td>${cells}<td class="totcol">${tot||''}</td></tr>`;
+  }).join('');
+  card.innerHTML = `<div class="section-label">Full Scorecard Grid</div>
+    <div class="scroll-hint">‹ swipe to see all 18 holes ›</div>
+    <div class="grid-scroll"><table><thead>${thead}</thead><tbody>${rows}</tbody></table></div>`;
+  card.querySelectorAll('input').forEach(inp=>{
+    inp.oninput = ()=>{
+      const p = Number(inp.dataset.p), h = Number(inp.dataset.h);
+      state.scores[p][h] = inp.value===''? null : Number(inp.value);
+      scheduleSave();
+    };
+  });
+  return card;
+}
+
+/* ---------- Junk Bet card (lives on the Card tab, per hole) ---------- */
+function renderJunkCard(ap, hIdx, isPar3){
+  const card = el(`<div class="card"></div>`);
+  const jk = state.junks[hIdx];
+  const h = hIdx + 1;
+
+  if(!jk || !jk.participants || jk.participants.length < 2){
+    const introLabel = isPar3 ? `Junk — Hole ${h} · Par 3` : `Junk — Hole ${h}`;
+    const introHint = isPar3
+      ? `Closest-to-the-pin side bet, not handicapped. Pick 2–5 players for this hole's junk bet.`
+      : `Junk bets aren't automatic here — they only happen if players issue a challenge to each other.`;
+    card.innerHTML = `
+      <div class="section-label">${introLabel}</div>
+      <p class="hint">${introHint}</p>
+      ${isPar3 ? '' : '<button class="btn-ghost btn-block" id="openChallengeBtn">+ Issue a Challenge</button>'}
+      <div id="junkSetupArea" style="${isPar3?'':'display:none; margin-top:10px;'}"></div>
+    `;
+    const setupArea = card.querySelector('#junkSetupArea');
+    setupArea.innerHTML = `
+      <div id="junkPlayerChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
+      <div class="row" style="margin-bottom:10px;">
+        <div><label class="field-label">$ per junk</label><input type="number" id="junkAmt" value="${state.junkAmount}"></div>
+      </div>
+      <button class="btn-primary btn-block" id="startJunkBtn">${isPar3 ? `Start Junk Bet on Hole ${h}` : 'Start Challenge'}</button>
+    `;
+    if(!isPar3){
+      card.querySelector('#openChallengeBtn').onclick = ()=>{
+        setupArea.style.display = 'block';
+        card.querySelector('#openChallengeBtn').style.display = 'none';
+      };
+    }
+    const chipWrap = setupArea.querySelector('#junkPlayerChips');
+    const selected = new Set();
+    ap.forEach(p=>{
+      const chip = document.createElement('button');
+      chip.type='button'; chip.className='btn-ghost btn-small'; chip.textContent = p.name;
+      chip.onclick = ()=>{
+        if(selected.has(p.num)){ selected.delete(p.num); chip.className='btn-ghost btn-small'; }
+        else { if(selected.size>=5){ alert('Max 5 players.'); return; } selected.add(p.num); chip.className='btn-primary btn-small'; }
+      };
+      chipWrap.appendChild(chip);
+    });
+    setupArea.querySelector('#junkAmt').oninput = e=>{ state.junkAmount = Number(e.target.value)||0; scheduleSave(); };
+    setupArea.querySelector('#startJunkBtn').onclick = ()=>{
+      if(selected.size<2){ alert('Pick at least 2 players.'); return; }
+      state.junks[hIdx] = { participants:[...selected], events:[] };
+      scheduleSave(); renderAll();
+    };
+    return card;
+  }
+
+  const participants = jk.participants.map(n=> ({ num:n, name: (state.players[n-1] && state.players[n-1].name) || ('Player '+n) }));
+  card.innerHTML = `
+    <div class="pot-header">
+      <span class="ptitle">${isPar3 ? 'Junk' : 'Challenge'} — Hole ${h}${isPar3?' · Par 3':''}</span>
+      <span class="pot-amount">$${state.junkAmount} / junk</span>
+    </div>
+    <p class="hint">Playing: ${participants.map(p=>p.name).join(', ')} — <button class="link-btn" id="cancelJunkBtn" style="font-size:11px;">cancel bet</button></p>
+    <div class="team-label">Log a shot</div>
+    <label class="field-label">Shooter (whose ball just landed)</label>
+    <select id="junkShooter"></select>
+    <label class="field-label" style="margin-top:10px;">Currently closer to the pin than the shooter (each gets 1 junk)</label>
+    <div id="junkWinnerChips" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px;"></div>
+    <button class="btn-primary btn-block" id="addJunkEventBtn">Add Junk Event</button>
+    <div id="junkEventsList" style="margin-top:12px;"></div>
+    <div id="junkHoleTotals" style="margin-top:10px;"></div>
+  `;
+  const shooterSel = card.querySelector('#junkShooter');
+  participants.forEach(p=>{ const o=document.createElement('option'); o.value=p.num; o.textContent=p.name; shooterSel.appendChild(o); });
+
+  const winnerChipWrap = card.querySelector('#junkWinnerChips');
+  const winnerSel = new Set();
+  function renderWinnerChips(){
+    winnerChipWrap.innerHTML = '';
+    const shooterNum = Number(shooterSel.value);
+    participants.filter(p=>p.num!==shooterNum).forEach(p=>{
+      const chip = document.createElement('button');
+      chip.type='button';
+      chip.className = winnerSel.has(p.num) ? 'btn-primary btn-small' : 'btn-ghost btn-small';
+      chip.textContent = p.name;
+      chip.onclick = ()=>{
+        if(winnerSel.has(p.num)) winnerSel.delete(p.num); else winnerSel.add(p.num);
+        renderWinnerChips();
+      };
+      winnerChipWrap.appendChild(chip);
+    });
+  }
+  shooterSel.onchange = ()=>{ winnerSel.clear(); renderWinnerChips(); };
+  renderWinnerChips();
+
+  card.querySelector('#addJunkEventBtn').onclick = ()=>{
+    const shooterNum = Number(shooterSel.value);
+    if(winnerSel.size===0){ alert('Select at least one player who is currently closer to the pin.'); return; }
+    jk.events.push({ shooter: shooterNum, winners:[...winnerSel] });
+    scheduleSave(); renderAll();
+  };
+
+  card.querySelector('#cancelJunkBtn').onclick = (e)=>{
+    e.preventDefault();
+    if(confirm('Cancel the junk bet on this hole? This clears all logged events for this hole.')){
+      delete state.junks[hIdx];
+      scheduleSave(); renderAll();
+    }
+  };
+
+  const listEl = card.querySelector('#junkEventsList');
+  if(jk.events.length){
+    listEl.innerHTML = `<div class="team-label">Events this hole</div>`;
+    jk.events.forEach((ev,i)=>{
+      const shooterP = participants.find(p=>p.num===ev.shooter);
+      const winnerNames = ev.winners.map(w=> (participants.find(p=>p.num===w)||{}).name).join(', ');
+      const row = document.createElement('div');
+      row.className = 'payout-row';
+      row.innerHTML = `<div class="payout-sub">${shooterP?shooterP.name:'?'} owes 1 junk each to ${winnerNames}</div>`;
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn-ghost btn-small'; delBtn.textContent = '×';
+      delBtn.onclick = ()=>{ jk.events.splice(i,1); scheduleSave(); renderAll(); };
+      row.appendChild(delBtn);
+      listEl.appendChild(row);
+    });
+  }
+
+  const totalsEl = card.querySelector('#junkHoleTotals');
+  const holeTotals = junkHoleNet(hIdx);
+  if(Object.keys(holeTotals).length){
+    totalsEl.innerHTML = `<div class="team-label">Hole subtotal</div>`;
+    participants.forEach(p=>{
+      const v = holeTotals[p.num] || 0;
+      const row = document.createElement('div');
+      row.className = 'payout-row';
+      row.innerHTML = `<div class="payout-name" style="font-size:13px;">${p.name}</div><div class="payout-amt ${v>0?'amt-pos':v<0?'amt-neg':'amt-zero'}" style="font-size:14px;">${fmtMoney(v)}</div>`;
+      totalsEl.appendChild(row);
+    });
+  }
+
+  return card;
+}
+
+/* ---------- MATCH PLAY TAB ---------- */
+function nineCardHtml(nine, label){
+  const flag = nine.numPresses>0 ? `<span class="press-flag">${FLAG_SVG} ${nine.numPresses} PRESS${nine.numPresses===1?'':'ES'}</span>` : '';
+  return `
+    <div class="nine-block">
+      <div class="nine-head">
+        <span class="label">${label}</span>
+        ${flag}
+      </div>
+      ${holeBar(nine.results)}
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="status-pill ${pillClass(nine.liveCum)}">${nine.holesPlayed? pillText(nine.liveCum,'UP','DN') : 'NOT STARTED'}</span>
+        <span class="nine-units">${nine.holesPlayed? (nine.units>0?'+':'')+nine.units+' unit'+(Math.abs(nine.units)===1?'':'s') : '—'}</span>
+      </div>
+    </div>`;
+}
+function straightCardHtml(leg, label){
+  return `
+    <div class="nine-block">
+      <div class="nine-head">
+        <span class="label">${label}</span>
+      </div>
+      ${holeBar(leg.results)}
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="status-pill ${pillClass(leg.liveCum)}">${leg.holesPlayed? pillText(leg.liveCum,'UP','DN') : 'NOT STARTED'}</span>
+        <span class="nine-units">${leg.holesPlayed? (leg.result>0?'+':'')+leg.result+' unit'+(Math.abs(leg.result)===1?'':'s') : '—'}</span>
+      </div>
+    </div>`;
+}
+
+function renderMatch(){
+  const wrap = el(`<div></div>`);
+  if(!state.enableMatchPlay){
+    wrap.appendChild(el(`<div class="off-banner">🔕 Match Play is turned OFF — excluded from Payout. Turn it back on in Setup.</div>`));
+  }
+  const matches = allMatches();
+  if(matches.length===0){
+    wrap.appendChild(el(`<div class="card empty-state">Add at least 2 players on Setup to generate matches.</div>`));
+    return wrap;
+  }
+  const intro = el(`<div class="card"><div class="section-label">Game 1 · Nassau (Match Play)</div><p class="hint">Low handicap in each match plays scratch. Three separate bets: front nine, back nine, and the overall 18. A 2-down auto-press fires on the front and back nine — and a press can itself go 2-down and spawn another press. The 18-hole bet is straight match play with no presses.</p></div>`);
+  wrap.appendChild(intro);
+  matches.forEach(m=>{
+    const card = el(`<div class="card"></div>`);
+    card.innerHTML = `
+      <div class="matchup">
+        <div class="vs">${m.pA.name}<span class="sep">vs</span>${m.pB.name}</div>
+      </div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink-soft);">Strokes: ${m.lowIsA? m.pB.name : m.pA.name} gets ${m.diff}</div>
+      ${nineCardHtml(m.front,'FRONT NINE')}
+      ${nineCardHtml(m.back,'BACK NINE')}
+      ${straightCardHtml(m.all18,'ALL 18 · STRAIGHT, NO PRESS')}
+      <div class="match-total">
+        <span>Combined — 3 separate bets</span>
+        <span class="${m.total>0?'amt-pos':m.total<0?'amt-neg':'amt-zero'}">${m.total>0?'+':''}${m.total} unit${Math.abs(m.total)===1?'':'s'}</span>
+      </div>
+      <div class="divider-note" style="margin-top:2px;">Front ${m.front.units>0?'+':''}${m.front.units} · Back ${m.back.units>0?'+':''}${m.back.units} · All 18 ${m.all18.result>0?'+':''}${m.all18.result} — each settles on its own; they aren't the same bet</div>
+    `;
+    wrap.appendChild(card);
+  });
+  return wrap;
+}
+
+/* ---------- BEST BALL TAB ---------- */
+function renderBestBall(){
+  const wrap = el(`<div></div>`);
+  if(!state.enableBestBall){
+    wrap.appendChild(el(`<div class="off-banner">🔕 Best Ball is turned OFF — excluded from Payout. Turn it back on in Setup.</div>`));
+  }
+  const ap = activePlayers();
+  const boxMode = useBoxFormat();
+  const introText = boxMode
+    ? `3 six-hole rounds. Two players are "in the box" each round and play three separate matches — one against each possible pairing of the other three players. Lowest handicap in the field is zeroed; everyone else plays off that. Best ball ties are broken by the second (partner's) ball. Every hole won outright automatically adds a brand-new bet to that match.`
+    : `3 six-hole rounds, a new partner each time. Lowest handicap in the field is zeroed; everyone else plays off that. Best ball ties on the low score are broken by the second (partner's) ball. Every hole that's won outright — not tied — automatically adds a brand-new bet for the rest of that round, so a 6-hole match can carry up to 6 bets total.`;
+  const intro = el(`<div class="card"><div class="section-label">Game 2 · Better Ball Round Robin</div><p class="hint">${introText}</p></div>`);
+  wrap.appendChild(intro);
+
+  if(ap.length<4){
+    wrap.appendChild(el(`<div class="card empty-state">Best ball needs at least 4 players — add players on Setup.</div>`));
+    return wrap;
+  }
+
+  if(ap.length===5){
+    const toggleCard = el(`<div class="card"></div>`);
+    toggleCard.innerHTML = `
+      <div class="section-label">Format</div>
+      <div class="viewtoggle" style="margin-bottom:0;">
+        <button class="${!boxMode?'btn-primary':'btn-ghost'}" id="bb4Btn">4 Players</button>
+        <button class="${boxMode?'btn-primary':'btn-ghost'}" id="bb5Btn">5 Players · Box</button>
+      </div>
+      <p class="hint" style="margin-top:8px;">${boxMode ? 'All 5 play every round — two in the box facing three matches against the field.' : 'Pick which 4 of the 5 play each round below (the 5th sits that round out).'}</p>
+    `;
+    toggleCard.querySelector('#bb4Btn').onclick = ()=>{ state.bestBallFormat='4'; scheduleSave(); renderAll(); };
+    toggleCard.querySelector('#bb5Btn').onclick = ()=>{ state.bestBallFormat='5'; scheduleSave(); renderAll(); };
+    wrap.appendChild(toggleCard);
+  }
+
+  if(boxMode){
+    renderBestBallBox(wrap, ap);
+  } else {
+    renderBestBallStandard(wrap, ap);
+  }
+
+  const totals = bestBallPlayerTotals();
+  const tcard = el(`<div class="card"><div class="section-label">Player Totals — Best Ball</div></div>`);
+  ap.forEach(p=>{
+    const u = totals[p.num] || 0;
+    const row = el(`<div class="payout-row">
+      <div><div class="payout-name">${p.name}</div></div>
+      <div class="payout-amt ${u>0?'amt-pos':u<0?'amt-neg':'amt-zero'}">${u>0?'+':''}${u} u</div>
+    </div>`);
+    tcard.appendChild(row);
+  });
+  wrap.appendChild(tcard);
+  return wrap;
+}
+
+function renderBestBallStandard(wrap, ap){
+  for(let r=0;r<3;r++){
+    const rd = state.rounds[r];
+    const card = el(`<div class="card"></div>`);
+    const holeStart = r*6+1;
+    card.innerHTML = `<div class="section-label">Round ${r+1} · Holes ${holeStart}–${holeStart+5}</div>`;
+    const teamWrap = el(`<div></div>`);
+    ['a','b'].forEach(side=>{
+      const label = side==='a' ? 'Team A' : 'Team B';
+      const trow = el(`<div><div class="team-label">${label}</div><div class="team-slot-row"></div></div>`);
+      const slotRow = trow.querySelector('.team-slot-row');
+      [0,1].forEach(slot=>{
+        const s = document.createElement('select');
+        s.innerHTML = `<option value="0">— sit out —</option>` + state.players.map((p,i)=>`<option value="${i+1}">${p.name||('Player '+(i+1))}</option>`).join('');
+        s.value = rd[side][slot] || 0;
+        s.onchange = ()=>{ rd[side][slot] = Number(s.value); scheduleSave(); renderAll(); };
+        slotRow.appendChild(s);
+      });
+      teamWrap.appendChild(trow);
+    });
+    card.appendChild(teamWrap);
+
+    const res = bestBallRound(r);
+    const nameOf = n => n? (state.players[n-1].name || ('Player '+n)) : '(sitting out)';
+    const flag = res.numPresses>0 ? `<span class="press-flag">${FLAG_SVG} ${res.numPresses} BET${res.numPresses===1?'':'S'} ADDED</span>` : '';
+    const resultBlock = el(`
+      <div class="nine-block">
+        <div class="nine-head"><span class="label">${nameOf(rd.a[0])} &amp; ${nameOf(rd.a[1])} vs ${nameOf(rd.b[0])} &amp; ${nameOf(rd.b[1])}</span>${flag}</div>
+        ${holeBar(res.results)}
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span class="status-pill ${pillClass(res.liveCum)}">${res.holesPlayed? pillText(res.liveCum,'UP','DN') : 'NOT STARTED'}</span>
+          <span class="nine-units">${res.holesPlayed? (res.units>0?'+':'')+res.units+' unit'+(Math.abs(res.units)===1?'':'s') : '—'}</span>
+        </div>
+      </div>`);
+    card.appendChild(resultBlock);
+    wrap.appendChild(card);
+  }
+}
+
+function renderBestBallBox(wrap, ap){
+  const nameOf = n => n? ((state.players[n-1] && state.players[n-1].name) || ('Player '+n)) : '?';
+  for(let r=0;r<3;r++){
+    const card = el(`<div class="card"></div>`);
+    const holeStart = r*6+1;
+    card.innerHTML = `<div class="section-label">Round ${r+1} · Holes ${holeStart}–${holeStart+5}</div>`;
+
+    const boxRow = el(`<div><div class="team-label">In the box</div><div class="team-slot-row"></div></div>`);
+    const slotRow = boxRow.querySelector('.team-slot-row');
+    const bx = state.boxRounds[r].box;
+    [0,1].forEach(slot=>{
+      const s = document.createElement('select');
+      s.innerHTML = ap.map(p=>`<option value="${p.num}">${p.name}</option>`).join('');
+      s.value = bx[slot];
+      s.onchange = ()=>{
+        const v = Number(s.value);
+        if(v === bx[1-slot]){ alert('Both box spots need different players.'); s.value = bx[slot]; return; }
+        bx[slot] = v; scheduleSave(); renderAll();
+      };
+      slotRow.appendChild(s);
+    });
+    card.appendChild(boxRow);
+
+    const { box, field, matches } = bestBallBoxRound(r);
+    const fieldNote = el(`<p class="hint" style="margin-top:8px;">${nameOf(box[0])} &amp; ${nameOf(box[1])} play the field (${field.map(nameOf).join(', ')}) — one match against each pairing.</p>`);
+    card.appendChild(fieldNote);
+
+    matches.forEach(({opponents, match})=>{
+      const flag = match.numPresses>0 ? `<span class="press-flag">${FLAG_SVG} ${match.numPresses} BET${match.numPresses===1?'':'S'} ADDED</span>` : '';
+      const block = el(`
+        <div class="nine-block">
+          <div class="nine-head"><span class="label">vs ${nameOf(opponents[0])} &amp; ${nameOf(opponents[1])}</span>${flag}</div>
+          ${holeBar(match.results)}
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="status-pill ${pillClass(match.liveCum)}">${match.holesPlayed? pillText(match.liveCum,'UP','DN') : 'NOT STARTED'}</span>
+            <span class="nine-units">${match.holesPlayed? (match.units>0?'+':'')+match.units+' unit'+(Math.abs(match.units)===1?'':'s') : '—'}</span>
+          </div>
+        </div>`);
+      card.appendChild(block);
+    });
+
+    wrap.appendChild(card);
+  }
+}
+
+/* ---------- PAYOUT TAB ---------- */
+/* ---------- POT OF GOLD TAB ---------- */
+function renderPotOfGold(){
+  const wrap = el(`<div></div>`);
+  if(!state.enablePotOfGold){
+    wrap.appendChild(el(`<div class="off-banner">🔕 Pot of Gold is turned OFF — excluded from Payout. Turn it back on in Setup.</div>`));
+  }
+  const ap = activePlayers();
+
+  const intro = el(`<div class="card"></div>`);
+  intro.innerHTML = `
+    <div class="section-label">Pot of Gold</div>
+    <p class="hint">Pick who's buying in below — not everyone playing today has to be in the pot. Low net score wins each pot — front nine, back nine, and all 18. Net uses each player's own full handicap.</p>
+    <label class="field-label">Buying in</label>
+    <div id="potPlayerChips" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 12px;"></div>
+    <div class="buyin-strip">
+      <div><div class="blabel">Front $</div><input type="number" id="potFront" value="${state.potFront}"></div>
+      <div><div class="blabel">Back $</div><input type="number" id="potBack" value="${state.potBack}"></div>
+      <div><div class="blabel">All 18 $</div><input type="number" id="potAll" value="${state.potAll}"></div>
+    </div>
+    <p class="hint" style="margin-top:8px;" id="potBuyInSummary"></p>
+  `;
+  intro.querySelector('#potFront').oninput = e=>{ state.potFront = Number(e.target.value)||0; scheduleSave(); renderAll(); };
+  intro.querySelector('#potBack').oninput  = e=>{ state.potBack  = Number(e.target.value)||0; scheduleSave(); renderAll(); };
+  intro.querySelector('#potAll').oninput   = e=>{ state.potAll   = Number(e.target.value)||0; scheduleSave(); renderAll(); };
+
+  const chipWrap = intro.querySelector('#potPlayerChips');
+  const currentParticipants = potParticipantsResolved().map(p=>p.num);
+  ap.forEach(p=>{
+    const inPot = currentParticipants.includes(p.num);
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = inPot ? 'btn-primary btn-small' : 'btn-ghost btn-small';
+    chip.textContent = p.name;
+    chip.onclick = ()=>{
+      const nowSelected = new Set(potParticipantsResolved().map(x=>x.num));
+      if(nowSelected.has(p.num)){
+        if(nowSelected.size<=2){ alert('At least 2 players are needed in the pot.'); return; }
+        nowSelected.delete(p.num);
+      } else {
+        nowSelected.add(p.num);
+      }
+      state.potParticipants = ap.map(x=>x.num).filter(n=>nowSelected.has(n));
+      scheduleSave(); renderAll();
+    };
+    chipWrap.appendChild(chip);
+  });
+  const summaryEl = intro.querySelector('#potBuyInSummary');
+  const nIn = currentParticipants.length;
+  const totalBuyIn = state.potFront+state.potBack+state.potAll;
+  summaryEl.innerHTML = `Buy-in per player: <b>$${totalBuyIn}</b> (${nIn} player${nIn===1?'':'s'} in the pot → a $${totalBuyIn*nIn} pot total).`;
+  wrap.appendChild(intro);
+
+  if(ap.length<2){
+    wrap.appendChild(el(`<div class="card empty-state">Add at least 2 players on Setup to run the Pot of Gold.</div>`));
+    return wrap;
+  }
+  if(currentParticipants.length<2){
+    wrap.appendChild(el(`<div class="card empty-state">Pick at least 2 players above to run the Pot of Gold.</div>`));
+    return wrap;
+  }
+
+  const pog = computePotOfGold();
+
+  function leaderboardCard(title, seg){
+    const card = el(`<div class="card"></div>`);
+    const sorted = [...seg.entries].sort((a,b)=>{
+      if(a.net===null) return 1;
+      if(b.net===null) return -1;
+      return a.net-b.net;
+    });
+    const rowsHtml = sorted.map(e=>{
+      const isWinner = seg.complete && seg.winners.includes(e.p.num);
+      return `
+        <div class="lb-row ${isWinner?'winner':''}">
+          <div class="lb-rank">${isWinner?'🏆':''}</div>
+          <div class="lb-name">${e.p.name}</div>
+          ${isWinner?`<div class="lb-share">+$${seg.share.toFixed(seg.share%1===0?0:2)}</div>`:''}
+          <div class="lb-score">${e.net===null?'—':e.net}</div>
+        </div>`;
+    }).join('');
+    card.innerHTML = `
+      <div class="pot-header">
+        <span class="ptitle">${title}</span>
+        <span class="pot-amount">$${seg.potTotal} pot</span>
+      </div>
+      ${!seg.complete?`<div class="pending-badge">IN PROGRESS — shown so far</div>`:''}
+      <div style="margin-top:8px;">${rowsHtml}</div>
+    `;
+    return card;
+  }
+
+  wrap.appendChild(leaderboardCard('Front Nine — Low Net', pog.front));
+  wrap.appendChild(leaderboardCard('Back Nine — Low Net', pog.back));
+  wrap.appendChild(leaderboardCard('All 18 — Low Net', pog.all18));
+
+  const tcard = el(`<div class="card"><div class="section-label">Pot of Gold — Net $</div></div>`);
+  pog.ap.forEach(p=>{
+    const net = pog.netByPlayer[p.num] || 0;
+    const row = el(`<div class="payout-row">
+      <div><div class="payout-name">${p.name}</div></div>
+      <div class="payout-amt ${net>0?'amt-pos':net<0?'amt-neg':'amt-zero'}">${fmtMoney(net)}</div>
+    </div>`);
+    tcard.appendChild(row);
+  });
+  wrap.appendChild(tcard);
+
+  return wrap;
+}
+
+/* ---------- 9 POINT GAME TAB ---------- */
+function renderNinePoint(){
+  const wrap = el(`<div></div>`);
+  if(!state.enableNinePoint){
+    wrap.appendChild(el(`<div class="off-banner">🔕 9 Point Game is turned OFF — excluded from Payout. Turn it back on in Setup.</div>`));
+  }
+  const ap = activePlayers();
+
+  const intro = el(`<div class="card"></div>`);
+  intro.innerHTML = `
+    <div class="section-label">9 Point Game</div>
+    <p class="hint">A 3-player game. Field-low handicap zeroed within that threesome. Each hole is worth 9 points: 5 for the low net score, 3 for 2nd, 1 for 3rd. Ties split the points for the positions they cover evenly. Twist: if the hole winner isn't tied and beats the next-best score by 2 or more strokes, they sweep all 9 points.</p>
+    <label class="field-label">$ per point</label>
+    <input type="number" id="npUnit" value="${state.unitNinePoint}" style="max-width:140px;">
+  `;
+  intro.querySelector('#npUnit').oninput = e=>{ state.unitNinePoint = Number(e.target.value)||0; scheduleSave(); renderAll(); };
+  wrap.appendChild(intro);
+
+  if(ap.length<3){
+    wrap.appendChild(el(`<div class="card empty-state">Add at least 3 players on Setup to run the 9 Point Game.</div>`));
+    return wrap;
+  }
+
+  const parts = ninePointParticipantsResolved();
+  const pickCard = el(`<div class="card"></div>`);
+  pickCard.innerHTML = `
+    <div class="section-label">Who's Playing</div>
+    <p class="hint">Pick exactly 3 -- this is always a 3-person game, even on a day with 4 or 5 out.</p>
+    <div id="npPlayerChips" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+  `;
+  const chipWrap = pickCard.querySelector('#npPlayerChips');
+  const selectedNums = parts.map(p=>p.num);
+  ap.forEach(p=>{
+    const inPick = selectedNums.includes(p.num);
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = inPick ? 'btn-primary btn-small' : 'btn-ghost btn-small';
+    chip.textContent = p.name;
+    chip.onclick = ()=>{
+      const current = new Set(ninePointParticipantsResolved().map(x=>x.num));
+      if(current.has(p.num)){
+        current.delete(p.num);
+      } else {
+        if(current.size>=3){ alert('9 Point Game is exactly 3 players -- deselect someone first.'); return; }
+        current.add(p.num);
+      }
+      state.ninePointParticipants = ap.map(x=>x.num).filter(n=>current.has(n));
+      scheduleSave(); renderAll();
+    };
+    chipWrap.appendChild(chip);
+  });
+  wrap.appendChild(pickCard);
+
+  if(parts.length!==3){
+    wrap.appendChild(el(`<div class="card empty-state">Pick exactly 3 players above to run the 9 Point Game.</div>`));
+    return wrap;
+  }
+
+  const multCard = el(`<div class="card"></div>`);
+  multCard.innerHTML = `
+    <div class="section-label">Point Multiplier by Hole</div>
+    <p class="hint">Turn any hole into a 2x or 3x points hole -- great for a par 3, the last hole, wherever your group wants extra action.</p>
+    <div class="nine-tag">Front</div>
+    <div class="hole-grid" id="npMultFront" style="grid-template-columns:repeat(9,1fr);"></div>
+    <div class="nine-tag">Back</div>
+    <div class="hole-grid" id="npMultBack" style="grid-template-columns:repeat(9,1fr);"></div>
+  `;
+  [['#npMultFront',0],['#npMultBack',9]].forEach(([sel,offset])=>{
+    const gridEl = multCard.querySelector(sel);
+    for(let k=0;k<9;k++){
+      const h = offset+k;
+      const s = document.createElement('select');
+      s.style.fontSize = '11px'; s.style.padding = '4px 2px';
+      [1,2,3].forEach(m=>{ const o=document.createElement('option'); o.value=m; o.textContent=m+'x'; s.appendChild(o); });
+      s.value = state.ninePointMultiplier[h] || 1;
+      s.onchange = ()=>{ state.ninePointMultiplier[h] = Number(s.value); scheduleSave(); renderAll(); };
+      gridEl.appendChild(s);
+    }
+  });
+  wrap.appendChild(multCard);
+
+  const holeResults = ninePointAllHoles();
+  const totals = ninePointPlayerTotals();
+
+  const standCard = el(`<div class="card"><div class="section-label">Standings</div></div>`);
+  const sortedParts = [...parts].sort((a,b)=> (totals[b.num]||0) - (totals[a.num]||0));
+  sortedParts.forEach(p=>{
+    const pts = totals[p.num]||0;
+    const dollars = pts*state.unitNinePoint;
+    const row = el(`<div class="payout-row">
+      <div><div class="payout-name">${p.name}</div><div class="payout-sub">${pts % 1 === 0 ? pts : pts.toFixed(2)} pts</div></div>
+      <div class="payout-amt ${dollars>0?'amt-pos':dollars<0?'amt-neg':'amt-zero'}">${fmtMoney(dollars)}</div>
+    </div>`);
+    standCard.appendChild(row);
+  });
+  wrap.appendChild(standCard);
+
+  const gridCard = el(`<div class="card gridview"></div>`);
+  gridCard.innerHTML = `<div class="section-label">Points by Hole</div><div class="scroll-hint">‹ swipe to see all 18 holes ›</div>`;
+  const scrollDiv = document.createElement('div');
+  scrollDiv.className = 'grid-scroll';
+  let thead = `<tr><th class="rowlabel">Hole</th>${Array.from({length:18},(_,i)=>`<th>${i+1}${state.ninePointMultiplier[i]>1?'<br><span style=\"color:var(--brass)\">'+state.ninePointMultiplier[i]+'x</span>':''}</th>`).join('')}</tr>`;
+  let rows = parts.map(p=>{
+    const cells = holeResults.map(res=>{
+      if(!res) return `<td>—</td>`;
+      const v = res.pointsByNum[p.num]||0;
+      return `<td>${v===0?'':(v%1===0?v:v.toFixed(2))}</td>`;
+    }).join('');
+    return `<tr><td class="rowlabel">${p.name}</td>${cells}</tr>`;
+  }).join('');
+  scrollDiv.innerHTML = `<table><thead>${thead}</thead><tbody>${rows}</tbody></table>`;
+  gridCard.appendChild(scrollDiv);
+  wrap.appendChild(gridCard);
+
+  return wrap;
+}
+
+
+/* ---------- IGGAROTE TAB ---------- */
+function renderIggarote(){
+  const wrap = el(`<div></div>`);
+  if(!state.enableIggarote){
+    wrap.appendChild(el(`<div class="off-banner">🔕 Iggarote is turned OFF — excluded from Payout. Turn it back on in Setup.</div>`));
+  }
+  const ap = activePlayers();
+
+  const intro = el(`<div class="card"></div>`);
+  intro.innerHTML = `
+    <div class="section-label">Iggarote</div>
+    <p class="hint">Gross scoring, no handicap strokes. Played twice: holes 7-9 and holes 16-18. Shoot even par or better on the 3 holes to beat an opponent who doesn't. If there's a 7+ stroke handicap gap between you and an opponent, the lower-handicap player has to shoot <b>under</b> par (not just even) to win that head-to-head — the higher-handicap player still only needs even par. Both hit their number (or both miss) = a push. Each of the two segments is settled separately, per pair.</p>
+    <label class="field-label">$ per segment</label>
+    <input type="number" id="iggUnit" value="${state.unitIggarote}" style="max-width:140px;">
+  `;
+  intro.querySelector('#iggUnit').oninput = e=>{ state.unitIggarote = Number(e.target.value)||0; scheduleSave(); renderAll(); };
+  wrap.appendChild(intro);
+
+  if(ap.length<2){
+    wrap.appendChild(el(`<div class="card empty-state">Add at least 2 players on Setup to run Iggarote.</div>`));
+    return wrap;
+  }
+
+  const parts = iggaroteParticipantsResolved();
+  const pickCard = el(`<div class="card"></div>`);
+  pickCard.innerHTML = `
+    <div class="section-label">Buying In</div>
+    <p class="hint">Not everyone playing today has to be in this one — pick who's opted in.</p>
+    <div id="iggPlayerChips" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+  `;
+  const chipWrap = pickCard.querySelector('#iggPlayerChips');
+  const selectedNums = parts.map(p=>p.num);
+  ap.forEach(p=>{
+    const inPick = selectedNums.includes(p.num);
+    const chip = document.createElement('button');
+    chip.type='button';
+    chip.className = inPick ? 'btn-primary btn-small' : 'btn-ghost btn-small';
+    chip.textContent = p.name;
+    chip.onclick = ()=>{
+      const current = new Set(iggaroteParticipantsResolved().map(x=>x.num));
+      if(current.has(p.num)){
+        if(current.size<=2){ alert('At least 2 players are needed.'); return; }
+        current.delete(p.num);
+      } else {
+        current.add(p.num);
+      }
+      state.iggaroteParticipants = ap.map(x=>x.num).filter(n=>current.has(n));
+      scheduleSave(); renderAll();
+    };
+    chipWrap.appendChild(chip);
+  });
+  wrap.appendChild(pickCard);
+
+  if(parts.length<2){
+    wrap.appendChild(el(`<div class="card empty-state">Pick at least 2 players above.</div>`));
+    return wrap;
+  }
+
+  const matches = allIggaroteMatches();
+  function segLine(seg, label){
+    if(!seg) return `<div class="nine-block"><div class="nine-head"><span class="label">${label}</span></div><span class="status-pill pill-even">NOT FINISHED</span></div>`;
+    const noteA = seg.bigGap && seg.lowIsA ? ' (needs under par -- 7+ hcp gap)' : '';
+    const noteB = seg.bigGap && !seg.lowIsA ? ' (needs under par -- 7+ hcp gap)' : '';
+    const outcome = seg.result>0 ? 'A wins' : seg.result<0 ? 'B wins' : 'Push';
+    return `
+      <div class="nine-block">
+        <div class="nine-head"><span class="label">${label}</span><span class="status-pill ${seg.result>0?'pill-up':seg.result<0?'pill-down':'pill-even'}">${outcome}</span></div>
+        <div class="hint" style="margin:4px 0;">Par ${seg.par} · A shot ${seg.grossA}${seg.aHits?' ✓':' ✗'}${noteA} · B shot ${seg.grossB}${seg.bHits?' ✓':' ✗'}${noteB}</div>
+      </div>`;
+  }
+  matches.forEach(m=>{
+    const card = el(`<div class="card"></div>`);
+    card.innerHTML = `
+      <div class="matchup"><div class="vs">${m.pA.name}<span class="sep">vs</span>${m.pB.name}</div></div>
+      ${segLine(m.seg1, 'HOLES 7-9')}
+      ${segLine(m.seg2, 'HOLES 16-18')}
+    `;
+    wrap.appendChild(card);
+  });
+
+  const totals = iggarotePlayerTotals();
+  const tcard = el(`<div class="card"><div class="section-label">Iggarote — Net $</div></div>`);
+  parts.forEach(p=>{
+    const d = totals[p.num]||0;
+    const row = el(`<div class="payout-row">
+      <div><div class="payout-name">${p.name}</div></div>
+      <div class="payout-amt ${d>0?'amt-pos':d<0?'amt-neg':'amt-zero'}">${fmtMoney(d)}</div>
+    </div>`);
+    tcard.appendChild(row);
+  });
+  wrap.appendChild(tcard);
+
+  return wrap;
+}
+
+function renderPayout(){
+  const wrap = el(`<div></div>`);
+  const ap = activePlayers();
+  const unitCard = el(`<div class="card"></div>`);
+  unitCard.innerHTML = `
+    <div class="section-label">Unit Values</div>
+    <div class="row">
+      <div>
+        <label class="field-label">$ / unit — Match Play</label>
+        <input type="number" id="unitMatch" value="${state.unitMatch}">
+      </div>
+      <div>
+        <label class="field-label">$ / unit — Best Ball</label>
+        <input type="number" id="unitBB" value="${state.unitBB}">
+      </div>
+    </div>
+    <p class="hint" style="margin-top:10px;">A unit is one bet: a nine or a press.</p>
+  `;
+  unitCard.querySelector('#unitMatch').oninput = e=>{ state.unitMatch = Number(e.target.value)||0; scheduleSave(); renderPayoutTable(); };
+  unitCard.querySelector('#unitBB').oninput = e=>{ state.unitBB = Number(e.target.value)||0; scheduleSave(); renderPayoutTable(); };
+  wrap.appendChild(unitCard);
+
+  const table = el(`<div class="card" id="payoutTable"></div>`);
+  wrap.appendChild(table);
+  setTimeout(renderPayoutTable, 0);
+
+  function renderPayoutTable(){
+    const tc = document.getElementById('payoutTable');
+    if(!tc) return;
+    if(!ap.length){ tc.innerHTML = `<div class="empty-state">Add players on Setup to see payouts.</div>`; return; }
+    const mpTotals = state.enableMatchPlay ? matchPlayPlayerTotals() : {};
+    const bbTotals = (state.enableBestBall && ap.length>=4) ? bestBallPlayerTotals() : {};
+    const pog = (state.enablePotOfGold && ap.length>=2) ? computePotOfGold() : null;
+    const npTotals = (state.enableNinePoint && ninePointParticipantsResolved().length===3) ? ninePointPlayerTotals() : {};
+    const iggTotals = (state.enableIggarote && iggaroteParticipantsResolved().length>=2) ? iggarotePlayerTotals() : {};
+    const jkTotals = junkTotals();
+    tc.innerHTML = `<div class="section-label">Net Payout</div>`;
+    ap.forEach(p=>{
+      const mpU = mpTotals[p.num]||0;
+      const bbU = bbTotals[p.num]||0;
+      const potD = pog ? (pog.netByPlayer[p.num]||0) : 0;
+      const npPts = npTotals[p.num]||0;
+      const npD = state.enableNinePoint ? npPts*state.unitNinePoint : 0;
+      const iggD = state.enableIggarote ? (iggTotals[p.num]||0) : 0;
+      const jkD = jkTotals[p.num]||0;
+      const mpD = mpU*state.unitMatch, bbD = bbU*state.unitBB;
+      const totalD = mpD+bbD+potD+npD+iggD+jkD;
+      const parts = [];
+      parts.push(state.enableMatchPlay ? `Nassau ${mpU>0?'+':''}${mpU}u (F+B+18)` : `Nassau off`);
+      parts.push(state.enableBestBall ? `Best Ball ${bbU>0?'+':''}${bbU}u` : `Best Ball off`);
+      parts.push(state.enablePotOfGold ? `Gold ${fmtMoney(potD)}` : `Gold off`);
+      parts.push(state.enableNinePoint ? `9pt ${npPts%1===0?npPts:npPts.toFixed(2)}pts` : `9pt off`);
+      parts.push(state.enableIggarote ? `Iggy ${fmtMoney(iggD)}` : `Iggy off`);
+      parts.push(`Junk ${fmtMoney(jkD)}`);
+      const row = el(`
+        <div class="payout-row">
+          <div>
+            <div class="payout-name">${p.name}</div>
+            <div class="payout-sub">${parts.join(' · ')}</div>
+          </div>
+          <div class="payout-amt ${totalD>0?'amt-pos':totalD<0?'amt-neg':'amt-zero'}">${fmtMoney(totalD)}</div>
+        </div>`);
+      tc.appendChild(row);
+    });
+  }
+
+  const exportCard = el(`<div class="card"></div>`);
+  exportCard.innerHTML = `
+    <div class="section-label">End of Round Summary</div>
+    <p class="hint">Gross &amp; net scores (front/back/18), every bet broken down, and the final tally -- ready to save or send to the group.</p>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <button class="btn-primary btn-block" id="dlPdfBtn">Download PDF</button>
+      <button class="btn-ghost btn-block" id="dlTxtBtn">Download Text File</button>
+      <button class="btn-ghost btn-block" id="emailBtn">Email Summary</button>
+    </div>
+  `;
+  exportCard.querySelector('#dlPdfBtn').onclick = downloadPdfSummary;
+  exportCard.querySelector('#dlTxtBtn').onclick = downloadTextSummary;
+  exportCard.querySelector('#emailBtn').onclick = emailSummary;
+  wrap.appendChild(exportCard);
+
+  return wrap;
+}
+
+/* ============================================================
+   INIT
+   ============================================================ */
+loadState();
+</script>
+</body>
+</html>
