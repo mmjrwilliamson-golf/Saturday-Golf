@@ -852,16 +852,19 @@ function buildSummaryReport(){
   // Game 4: 9 Point Game
   lines.push('GAME 4 -- 9 POINT GAME' + (state.enableNinePoint ? '' : '  [OFF -- not counted in payout]'));
   let npTotals = {};
+  let npSettle = {};
   const npParts = ninePointParticipantsResolved();
   if(!state.enableNinePoint){
     lines.push('  (turned off in Setup)');
   } else if(npParts.length===3){
     npTotals = ninePointPlayerTotals();
+    npSettle = ninePointSettlement();
     lines.push('  Players: ' + npParts.map(p=>p.name).join(', '));
-    lines.push('  Points per player (5-3-1 per hole, ties split, win-by-2 sweeps all 9):');
+    lines.push('  Points per player (5-3-1 per hole, ties split, win-by-2 sweeps all 9),');
+    lines.push('  settled pairwise by point difference at $' + state.unitNinePoint + '/point:');
     npParts.forEach(p=>{
       const pts = npTotals[p.num]||0;
-      lines.push('  ' + padR(p.name,16) + padL(pts%1===0?pts:pts.toFixed(2),8) + ' pts   ' + fmtMoney(pts*state.unitNinePoint));
+      lines.push('  ' + padR(p.name,16) + padL(pts%1===0?pts:pts.toFixed(2),8) + ' pts   ' + fmtMoney(npSettle[p.num]||0));
     });
   } else { lines.push('  (pick exactly 3 players on the 9 Point tab)'); }
   lines.push('');
@@ -914,7 +917,7 @@ function buildSummaryReport(){
     const mp = state.enableMatchPlay ? (mpTotals[p.num]||0)*state.unitMatch : 0;
     const bb = state.enableBestBall ? (bbTotals[p.num]||0)*state.unitBB : 0;
     const gold = (state.enablePotOfGold && pog2) ? (pog2.netByPlayer[p.num]||0) : 0;
-    const ninePt = state.enableNinePoint ? (npTotals[p.num]||0)*state.unitNinePoint : 0;
+    const ninePt = state.enableNinePoint ? (npSettle[p.num]||0) : 0;
     const iggy = state.enableIggarote ? (iggTotals2[p.num]||0) : 0;
     const junk = jkTotals[p.num]||0;
     const total = mp+bb+gold+ninePt+iggy+junk;
@@ -1105,6 +1108,25 @@ function ninePointPlayerTotals(){
     for(const num in res.pointsByNum) totals[num] = (totals[num]||0) + res.pointsByNum[num];
   });
   return totals;
+}
+// Raw points are never negative (a hole's 9 points always get fully handed out among the
+// 3 players, nobody "loses" points), so paying each player their raw point total would hand
+// out money with nobody actually owing anything. Settle it properly instead: every player
+// compares their point total against each of the other two, pays/collects the difference at
+// $/point. Low man ends up paying both of the others; 2nd pays 1st; 1st collects from both.
+function ninePointSettlement(){
+  const parts = ninePointParticipantsResolved();
+  const totals = ninePointPlayerTotals();
+  const settleD = {};
+  parts.forEach(p=>{ settleD[p.num] = 0; });
+  for(let i=0;i<parts.length;i++){
+    for(let j=0;j<parts.length;j++){
+      if(i===j) continue;
+      const diff = (totals[parts[i].num]||0) - (totals[parts[j].num]||0);
+      settleD[parts[i].num] += diff * state.unitNinePoint;
+    }
+  }
+  return settleD;
 }
 
 /* ---------- Iggarote: gross, holes 7-9 & 16-18, even-par target, 7+ hcp gap modifier ---------- */
@@ -2228,12 +2250,13 @@ function renderNinePoint(){
 
   const holeResults = ninePointAllHoles();
   const totals = ninePointPlayerTotals();
+  const settle = ninePointSettlement();
 
   const standCard = el(`<div class="card"><div class="section-label">Standings</div></div>`);
   const sortedParts = [...parts].sort((a,b)=> (totals[b.num]||0) - (totals[a.num]||0));
   sortedParts.forEach(p=>{
     const pts = totals[p.num]||0;
-    const dollars = pts*state.unitNinePoint;
+    const dollars = settle[p.num]||0;
     const row = el(`<div class="payout-row">
       <div><div class="payout-name">${p.name}</div><div class="payout-sub">${pts % 1 === 0 ? pts : pts.toFixed(2)} pts</div></div>
       <div class="payout-amt ${dollars>0?'amt-pos':dollars<0?'amt-neg':'amt-zero'}">${fmtMoney(dollars)}</div>
@@ -2392,6 +2415,7 @@ function renderPayout(){
     const bbTotals = (state.enableBestBall && ap.length>=4) ? bestBallPlayerTotals() : {};
     const pog = (state.enablePotOfGold && ap.length>=2) ? computePotOfGold() : null;
     const npTotals = (state.enableNinePoint && ninePointParticipantsResolved().length===3) ? ninePointPlayerTotals() : {};
+    const npSettle = (state.enableNinePoint && ninePointParticipantsResolved().length===3) ? ninePointSettlement() : {};
     const iggTotals = (state.enableIggarote && iggaroteParticipantsResolved().length>=2) ? iggarotePlayerTotals() : {};
     const jkTotals = junkTotals();
     tc.innerHTML = `<div class="section-label">Net Payout</div>`;
@@ -2400,7 +2424,7 @@ function renderPayout(){
       const bbU = bbTotals[p.num]||0;
       const potD = pog ? (pog.netByPlayer[p.num]||0) : 0;
       const npPts = npTotals[p.num]||0;
-      const npD = state.enableNinePoint ? npPts*state.unitNinePoint : 0;
+      const npD = state.enableNinePoint ? (npSettle[p.num]||0) : 0;
       const iggD = state.enableIggarote ? (iggTotals[p.num]||0) : 0;
       const jkD = jkTotals[p.num]||0;
       const mpD = mpU*state.unitMatch, bbD = bbU*state.unitBB;
