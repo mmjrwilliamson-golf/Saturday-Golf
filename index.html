@@ -353,6 +353,9 @@ function defaultState(){
     unitNinePoint: 1,
     ninePointMultiplier: Array(18).fill(1),
     ninePointParticipants: null,
+    enableIggarote: true,
+    unitIggarote: 25,
+    iggaroteParticipants: null,
     currentHole: 1,
     gridView: false
   };
@@ -864,7 +867,28 @@ function buildSummaryReport(){
   lines.push('');
 
   // Game 5: Junk
-  lines.push('GAME 5 -- JUNK');
+  // Game 5: Iggarote
+  lines.push('GAME 5 -- IGGAROTE' + (state.enableIggarote ? '' : '  [OFF -- not counted in payout]'));
+  const iggParts = iggaroteParticipantsResolved();
+  let iggTotals2 = {};
+  if(!state.enableIggarote){
+    lines.push('  (turned off in Setup)');
+  } else if(iggParts.length>=2){
+    iggTotals2 = iggarotePlayerTotals();
+    lines.push('  Gross, no strokes. Even par (or better) on holes 7-9 and 16-18 to beat an opponent;');
+    lines.push('   7+ hcp gap requires the low-handicap player to shoot under par against that opponent.');
+    allIggaroteMatches().forEach(m=>{
+      const segTxt = (seg) => !seg ? 'not finished' : (seg.result>0? m.pA.name+' wins' : seg.result<0? m.pB.name+' wins' : 'push') + ` (par ${seg.par}: ${m.pA.name} ${seg.grossA}, ${m.pB.name} ${seg.grossB})`;
+      lines.push(`  ${m.pA.name} vs ${m.pB.name}: Holes7-9 ${segTxt(m.seg1)} | Holes16-18 ${segTxt(m.seg2)}`);
+    });
+    lines.push('');
+    lines.push('Iggarote $ per player:');
+    iggParts.forEach(p=>{ lines.push('  ' + padR(p.name,16) + fmtMoney(iggTotals2[p.num]||0)); });
+  } else { lines.push('  (needs at least 2 players)'); }
+  lines.push('');
+
+  // Game 6: Junk
+  lines.push('GAME 6 -- JUNK');
   const jkTotals = junkTotals();
   const junkHoles = Object.keys(state.junks).filter(h => state.junks[h] && state.junks[h].events && state.junks[h].events.length);
   if(junkHoles.length){
@@ -891,8 +915,9 @@ function buildSummaryReport(){
     const bb = state.enableBestBall ? (bbTotals[p.num]||0)*state.unitBB : 0;
     const gold = (state.enablePotOfGold && pog2) ? (pog2.netByPlayer[p.num]||0) : 0;
     const ninePt = state.enableNinePoint ? (npTotals[p.num]||0)*state.unitNinePoint : 0;
+    const iggy = state.enableIggarote ? (iggTotals2[p.num]||0) : 0;
     const junk = jkTotals[p.num]||0;
-    const total = mp+bb+gold+ninePt+junk;
+    const total = mp+bb+gold+ninePt+iggy+junk;
     payoutTotals.push({ name:p.name, amount: Math.round(total*100)/100 });
     const rounded = Math.round(total*100)/100;
     const label = rounded>0.005 ? 'RECEIVES ' + fmtMoney(rounded).replace('+','')
@@ -1082,6 +1107,64 @@ function ninePointPlayerTotals(){
   return totals;
 }
 
+/* ---------- Iggarote: gross, holes 7-9 & 16-18, even-par target, 7+ hcp gap modifier ---------- */
+function iggaroteParticipantsResolved(){
+  const ap = activePlayers();
+  if(Array.isArray(state.iggaroteParticipants)){
+    const set = new Set(state.iggaroteParticipants);
+    const filtered = ap.filter(p=>set.has(p.num));
+    if(filtered.length>=2) return filtered;
+  }
+  return ap; // default: everyone playing today is in
+}
+function sumGross(idx, holeIdxs){
+  let sum=0;
+  for(const h of holeIdxs){ const g=state.scores[idx][h]; if(g==null) return null; sum+=g; }
+  return sum;
+}
+function iggaroteSegment(pA, pB, holeIdxs){
+  const c = course();
+  const par = holeIdxs.reduce((s,h)=>s+c.par[h],0);
+  const grossA = sumGross(pA.idx, holeIdxs);
+  const grossB = sumGross(pB.idx, holeIdxs);
+  if(grossA==null || grossB==null) return null;
+  const hcpA = Number(pA.hcp)||0, hcpB = Number(pB.hcp)||0;
+  const hcpDiff = Math.abs(hcpA - hcpB);
+  const lowIsA = hcpA <= hcpB;
+  const bigGap = hcpDiff >= 7;
+  const targetA = (bigGap && lowIsA) ? par-1 : par;
+  const targetB = (bigGap && !lowIsA) ? par-1 : par;
+  const aHits = grossA <= targetA;
+  const bHits = grossB <= targetB;
+  let result = 0;
+  if(aHits && !bHits) result = 1;
+  else if(bHits && !aHits) result = -1;
+  return { par, grossA, grossB, targetA, targetB, hcpDiff, bigGap, lowIsA, aHits, bHits, result };
+}
+function allIggaroteMatches(){
+  const parts = iggaroteParticipantsResolved();
+  const out = [];
+  for(let i=0;i<parts.length;i++){
+    for(let j=i+1;j<parts.length;j++){
+      const pA = parts[i], pB = parts[j];
+      out.push({ pA, pB, seg1: iggaroteSegment(pA,pB,[6,7,8]), seg2: iggaroteSegment(pA,pB,[15,16,17]) });
+    }
+  }
+  return out;
+}
+function iggarotePlayerTotals(){
+  const totals = {};
+  for(let i=1;i<=5;i++) totals[i]=0;
+  allIggaroteMatches().forEach(m=>{
+    [m.seg1, m.seg2].forEach(seg=>{
+      if(!seg) return;
+      totals[m.pA.num] += seg.result*state.unitIggarote;
+      totals[m.pB.num] -= seg.result*state.unitIggarote;
+    });
+  });
+  return totals;
+}
+
 /* ---------- Junk: live closest-to-pin ledger, per hole ---------- */
 function junkTotals(){
   const totals = {};
@@ -1142,6 +1225,7 @@ const TABS = [
   {id:'bb', label:'BEST BALL', icon:`<circle cx="12" cy="9" r="4" fill="none" stroke-width="2"/><path d="M5 21c0-3 3-5 7-5s7 2 7 5" fill="none" stroke-width="2"/>`},
   {id:'gold', label:'GOLD', icon:`<path d="M5 9h14l-1.4 8.6a2 2 0 01-2 1.4H8.4a2 2 0 01-2-1.4L5 9z" fill="none" stroke-width="2"/><path d="M8 9V7a4 4 0 018 0v2" fill="none" stroke-width="2"/><circle cx="12" cy="13" r="1.6" fill="currentColor" stroke="none"/>`},
   {id:'ninept', label:'9 POINT', icon:`<rect x="3" y="13" width="4.5" height="7" rx="1"/><rect x="9.75" y="8" width="4.5" height="12" rx="1"/><rect x="16.5" y="4" width="4.5" height="16" rx="1"/>`},
+  {id:'iggy', label:'IGGY', icon:`<circle cx="12" cy="12" r="8" fill="none" stroke-width="2"/><circle cx="12" cy="12" r="4.5" fill="none" stroke-width="2"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>`},
   {id:'pay', label:'PAYOUT', icon:`<path d="M3 8h18M3 8v10a2 2 0 002 2h14a2 2 0 002-2V8M3 8l2-4h14l2 4" fill="none" stroke-width="2"/>`},
 ];
 
@@ -1171,6 +1255,7 @@ function renderAll(){
   if(activeTab==='bb') main.appendChild(renderBestBall());
   if(activeTab==='gold') main.appendChild(renderPotOfGold());
   if(activeTab==='ninept') main.appendChild(renderNinePoint());
+  if(activeTab==='iggy') main.appendChild(renderIggarote());
   if(activeTab==='pay') main.appendChild(renderPayout());
 }
 
@@ -1220,6 +1305,7 @@ function renderSetup(){
     { key:'enableBestBall', label:'Best Ball', sub:'6-hole partner rounds' },
     { key:'enablePotOfGold', label:'Pot of Gold', sub:'Low net buy-in pot' },
     { key:'enableNinePoint', label:'9 Point Game', sub:'5-3-1 points per hole, tie-splitting' },
+    { key:'enableIggarote', label:'Iggarote', sub:'$25 gross bet, holes 7-9 & 16-18' },
   ];
   betDefs.forEach(def=>{
     const row = el(`
@@ -2177,6 +2263,101 @@ function renderNinePoint(){
 }
 
 
+/* ---------- IGGAROTE TAB ---------- */
+function renderIggarote(){
+  const wrap = el(`<div></div>`);
+  if(!state.enableIggarote){
+    wrap.appendChild(el(`<div class="off-banner">🔕 Iggarote is turned OFF — excluded from Payout. Turn it back on in Setup.</div>`));
+  }
+  const ap = activePlayers();
+
+  const intro = el(`<div class="card"></div>`);
+  intro.innerHTML = `
+    <div class="section-label">Iggarote</div>
+    <p class="hint">Gross scoring, no handicap strokes. Played twice: holes 7-9 and holes 16-18. Shoot even par or better on the 3 holes to beat an opponent who doesn't. If there's a 7+ stroke handicap gap between you and an opponent, the lower-handicap player has to shoot <b>under</b> par (not just even) to win that head-to-head — the higher-handicap player still only needs even par. Both hit their number (or both miss) = a push. Each of the two segments is settled separately, per pair.</p>
+    <label class="field-label">$ per segment</label>
+    <input type="number" id="iggUnit" value="${state.unitIggarote}" style="max-width:140px;">
+  `;
+  intro.querySelector('#iggUnit').oninput = e=>{ state.unitIggarote = Number(e.target.value)||0; scheduleSave(); renderAll(); };
+  wrap.appendChild(intro);
+
+  if(ap.length<2){
+    wrap.appendChild(el(`<div class="card empty-state">Add at least 2 players on Setup to run Iggarote.</div>`));
+    return wrap;
+  }
+
+  const parts = iggaroteParticipantsResolved();
+  const pickCard = el(`<div class="card"></div>`);
+  pickCard.innerHTML = `
+    <div class="section-label">Buying In</div>
+    <p class="hint">Not everyone playing today has to be in this one — pick who's opted in.</p>
+    <div id="iggPlayerChips" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+  `;
+  const chipWrap = pickCard.querySelector('#iggPlayerChips');
+  const selectedNums = parts.map(p=>p.num);
+  ap.forEach(p=>{
+    const inPick = selectedNums.includes(p.num);
+    const chip = document.createElement('button');
+    chip.type='button';
+    chip.className = inPick ? 'btn-primary btn-small' : 'btn-ghost btn-small';
+    chip.textContent = p.name;
+    chip.onclick = ()=>{
+      const current = new Set(iggaroteParticipantsResolved().map(x=>x.num));
+      if(current.has(p.num)){
+        if(current.size<=2){ alert('At least 2 players are needed.'); return; }
+        current.delete(p.num);
+      } else {
+        current.add(p.num);
+      }
+      state.iggaroteParticipants = ap.map(x=>x.num).filter(n=>current.has(n));
+      scheduleSave(); renderAll();
+    };
+    chipWrap.appendChild(chip);
+  });
+  wrap.appendChild(pickCard);
+
+  if(parts.length<2){
+    wrap.appendChild(el(`<div class="card empty-state">Pick at least 2 players above.</div>`));
+    return wrap;
+  }
+
+  const matches = allIggaroteMatches();
+  function segLine(seg, label){
+    if(!seg) return `<div class="nine-block"><div class="nine-head"><span class="label">${label}</span></div><span class="status-pill pill-even">NOT FINISHED</span></div>`;
+    const noteA = seg.bigGap && seg.lowIsA ? ' (needs under par -- 7+ hcp gap)' : '';
+    const noteB = seg.bigGap && !seg.lowIsA ? ' (needs under par -- 7+ hcp gap)' : '';
+    const outcome = seg.result>0 ? 'A wins' : seg.result<0 ? 'B wins' : 'Push';
+    return `
+      <div class="nine-block">
+        <div class="nine-head"><span class="label">${label}</span><span class="status-pill ${seg.result>0?'pill-up':seg.result<0?'pill-down':'pill-even'}">${outcome}</span></div>
+        <div class="hint" style="margin:4px 0;">Par ${seg.par} · A shot ${seg.grossA}${seg.aHits?' ✓':' ✗'}${noteA} · B shot ${seg.grossB}${seg.bHits?' ✓':' ✗'}${noteB}</div>
+      </div>`;
+  }
+  matches.forEach(m=>{
+    const card = el(`<div class="card"></div>`);
+    card.innerHTML = `
+      <div class="matchup"><div class="vs">${m.pA.name}<span class="sep">vs</span>${m.pB.name}</div></div>
+      ${segLine(m.seg1, 'HOLES 7-9')}
+      ${segLine(m.seg2, 'HOLES 16-18')}
+    `;
+    wrap.appendChild(card);
+  });
+
+  const totals = iggarotePlayerTotals();
+  const tcard = el(`<div class="card"><div class="section-label">Iggarote — Net $</div></div>`);
+  parts.forEach(p=>{
+    const d = totals[p.num]||0;
+    const row = el(`<div class="payout-row">
+      <div><div class="payout-name">${p.name}</div></div>
+      <div class="payout-amt ${d>0?'amt-pos':d<0?'amt-neg':'amt-zero'}">${fmtMoney(d)}</div>
+    </div>`);
+    tcard.appendChild(row);
+  });
+  wrap.appendChild(tcard);
+
+  return wrap;
+}
+
 function renderPayout(){
   const wrap = el(`<div></div>`);
   const ap = activePlayers();
@@ -2211,6 +2392,7 @@ function renderPayout(){
     const bbTotals = (state.enableBestBall && ap.length>=4) ? bestBallPlayerTotals() : {};
     const pog = (state.enablePotOfGold && ap.length>=2) ? computePotOfGold() : null;
     const npTotals = (state.enableNinePoint && ninePointParticipantsResolved().length===3) ? ninePointPlayerTotals() : {};
+    const iggTotals = (state.enableIggarote && iggaroteParticipantsResolved().length>=2) ? iggarotePlayerTotals() : {};
     const jkTotals = junkTotals();
     tc.innerHTML = `<div class="section-label">Net Payout</div>`;
     ap.forEach(p=>{
@@ -2219,14 +2401,16 @@ function renderPayout(){
       const potD = pog ? (pog.netByPlayer[p.num]||0) : 0;
       const npPts = npTotals[p.num]||0;
       const npD = state.enableNinePoint ? npPts*state.unitNinePoint : 0;
+      const iggD = state.enableIggarote ? (iggTotals[p.num]||0) : 0;
       const jkD = jkTotals[p.num]||0;
       const mpD = mpU*state.unitMatch, bbD = bbU*state.unitBB;
-      const totalD = mpD+bbD+potD+npD+jkD;
+      const totalD = mpD+bbD+potD+npD+iggD+jkD;
       const parts = [];
       parts.push(state.enableMatchPlay ? `Nassau ${mpU>0?'+':''}${mpU}u (F+B+18)` : `Nassau off`);
       parts.push(state.enableBestBall ? `Best Ball ${bbU>0?'+':''}${bbU}u` : `Best Ball off`);
       parts.push(state.enablePotOfGold ? `Gold ${fmtMoney(potD)}` : `Gold off`);
       parts.push(state.enableNinePoint ? `9pt ${npPts%1===0?npPts:npPts.toFixed(2)}pts` : `9pt off`);
+      parts.push(state.enableIggarote ? `Iggy ${fmtMoney(iggD)}` : `Iggy off`);
       parts.push(`Junk ${fmtMoney(jkD)}`);
       const row = el(`
         <div class="payout-row">
