@@ -520,6 +520,38 @@ async function fetchRoundHistory(){
     return snap.docs.map(d=>stateFromCloud(d.data()));
   }catch(e){ console.warn('fetch history failed', e); return []; }
 }
+async function fetchAllHistory(ref){
+  if(!ref) return [];
+  try{
+    const snap = await ref.collection('history').get();
+    return snap.docs.map(d=>stateFromCloud(d.data()));
+  }catch(e){ console.warn('fetch all history failed', e); return []; }
+}
+function historyYears(snapshots){
+  const years = new Set();
+  snapshots.forEach(s=>{ if(s.archivedAt) years.add(Number(s.archivedAt.slice(0,4))); });
+  return [...years].sort((a,b)=>b-a);
+}
+function computeCYStats(snapshots, year){
+  const stats = {}; // player name -> {roundsPlayed, nassau, bestBall, gold, ninePoint, iggarote, junk, total}
+  const liveState = state;
+  snapshots.forEach(snap=>{
+    if(!snap.archivedAt || !snap.archivedAt.startsWith(String(year))) return;
+    state = snap;
+    try{
+      computePlayerPayoutBreakdown().forEach(row=>{
+        if(!row.name) return;
+        if(!stats[row.name]) stats[row.name] = { roundsPlayed:0, nassau:0, bestBall:0, gold:0, ninePoint:0, iggarote:0, junk:0, total:0 };
+        const s = stats[row.name];
+        s.roundsPlayed++;
+        s.nassau += row.nassau; s.bestBall += row.bestBall; s.gold += row.gold;
+        s.ninePoint += row.ninePoint; s.iggarote += row.iggarote; s.junk += row.junk; s.total += row.total;
+      });
+    } catch(e){ console.warn('stats calc error for a round', e); }
+  });
+  state = liveState;
+  return stats;
+}
 
 
 /* ============================================================
@@ -943,6 +975,29 @@ function buildSummaryReport(){
   return lines.join('\n');
 }
 
+// Single source of truth for a round's per-player $ breakdown across every bet type.
+// Operates on whatever the global `state` currently points at, so it works for the live
+// round and (by temporarily swapping `state`) for any archived history snapshot too.
+function computePlayerPayoutBreakdown(){
+  const ap = activePlayers();
+  const mpTotals = state.enableMatchPlay ? matchPlayPlayerTotals() : {};
+  const bbTotals = (state.enableBestBall && ap.length>=4) ? bestBallPlayerTotals() : {};
+  const pog = (state.enablePotOfGold && ap.length>=2) ? computePotOfGold() : null;
+  const npSettle = (state.enableNinePoint && ninePointParticipantsResolved().length===3) ? ninePointSettlement() : {};
+  const iggTotals = (state.enableIggarote && iggaroteParticipantsResolved().length>=2) ? iggarotePlayerTotals() : {};
+  const jkTotals = junkTotals();
+  return ap.map(p=>{
+    const mpD = state.enableMatchPlay ? (mpTotals[p.num]||0)*state.unitMatch : 0;
+    const bbD = state.enableBestBall ? (bbTotals[p.num]||0)*state.unitBB : 0;
+    const potD = (state.enablePotOfGold && pog) ? (pog.netByPlayer[p.num]||0) : 0;
+    const npD = state.enableNinePoint ? (npSettle[p.num]||0) : 0;
+    const iggD = state.enableIggarote ? (iggTotals[p.num]||0) : 0;
+    const jkD = jkTotals[p.num]||0;
+    return { num:p.num, name:p.name, nassau:mpD, bestBall:bbD, gold:potD, ninePoint:npD, iggarote:iggD, junk:jkD,
+             total: mpD+bbD+potD+npD+iggD+jkD };
+  });
+}
+
 function computeSettlement(playerTotals){
   const creditors = playerTotals.filter(p=>p.amount>0.005).map(p=>({...p})).sort((a,b)=>b.amount-a.amount);
   const debtors = playerTotals.filter(p=>p.amount<-0.005).map(p=>({name:p.name, amount:-p.amount})).sort((a,b)=>b.amount-a.amount);
@@ -1278,6 +1333,7 @@ function renderAll(){
   if(activeTab==='gold') main.appendChild(renderPotOfGold());
   if(activeTab==='ninept') main.appendChild(renderNinePoint());
   if(activeTab==='iggy') main.appendChild(renderIggarote());
+  if(activeTab==='stats') main.appendChild(renderStatsView(cloud.ref, true));
   if(activeTab==='pay') main.appendChild(renderPayout());
 }
 
@@ -1426,8 +1482,22 @@ function renderCloudSyncCard(){
     card.innerHTML = `
       <div class="section-label">Cloud Sync</div>
       <p class="hint">🟢 Connected — this device is syncing live with group code <b>${cloud.code}</b>. Anyone who enters the same code sees and edits the same round in real time.</p>
+      <button class="btn-primary btn-block" id="viewStatsBtn" style="margin-bottom:8px;">View Season Stats</button>
+      <button class="btn-ghost btn-block" id="copyStatsLinkBtn" style="margin-bottom:8px;">Copy Shareable Stats Link</button>
       <button class="btn-ghost btn-block" id="disconnectBtn">Disconnect this device</button>
     `;
+    card.querySelector('#viewStatsBtn').onclick = ()=>{ activeTab='stats'; renderAll(); };
+    card.querySelector('#copyStatsLinkBtn').onclick = ()=>{
+      const cfg = localCloudConfig();
+      if(!cfg){ alert('Could not find your saved Firebase config.'); return; }
+      const encoded = btoa(JSON.stringify(cfg.config));
+      const url = `${location.origin}${location.pathname}?statscode=${encodeURIComponent(cfg.code)}&statscfg=${encoded}`;
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(url).then(()=>alert('Stats link copied! Anyone who opens it sees live season stats -- no setup needed on their end.')).catch(()=>{ prompt('Copy this link:', url); });
+      } else {
+        prompt('Copy this link:', url);
+      }
+    };
     card.querySelector('#disconnectBtn').onclick = ()=>{
       if(confirm('Disconnect from cloud sync? This device will go back to saving locally only.')){
         disconnectCloud();
@@ -2381,6 +2451,69 @@ function renderIggarote(){
   return wrap;
 }
 
+/* ---------- SEASON STATS (in-app tab and standalone shareable link both use this) ---------- */
+function renderStatsView(ref, showBackLink){
+  const wrap = el(`<div></div>`);
+  if(showBackLink){
+    const back = el(`<button class="link-btn" style="margin-bottom:6px;">← Back to Setup</button>`);
+    back.onclick = ()=>{ activeTab='setup'; renderAll(); };
+    wrap.appendChild(back);
+  }
+  const card = el(`<div class="card gridview"></div>`);
+  card.innerHTML = `<div class="section-label">Season Stats</div><p class="hint">Loading…</p>`;
+  wrap.appendChild(card);
+
+  if(!ref){
+    card.innerHTML = `<div class="section-label">Season Stats</div><div class="empty-state">Not connected to a shared round — Season Stats need Cloud Sync.</div>`;
+    return wrap;
+  }
+
+  fetchAllHistory(ref).then(snapshots=>{
+    const years = historyYears(snapshots);
+    const currentYear = new Date().getFullYear();
+    const defaultYear = years.includes(currentYear) ? currentYear : (years[0] || currentYear);
+    card.innerHTML = `
+      <div class="section-label">Season Stats</div>
+      <p class="hint">Every archived round for this group, totaled up by player and bet type.</p>
+      <label class="field-label">Year</label>
+      <select id="statsYearSel">${(years.length?years:[currentYear]).map(y=>`<option value="${y}" ${y===defaultYear?'selected':''}>${y}</option>`).join('')}</select>
+      <div id="statsTableArea" style="margin-top:12px;"></div>
+    `;
+    function renderTable(year){
+      const stats = computeCYStats(snapshots, year);
+      const rows = Object.entries(stats).map(([name,s])=>({name, ...s})).sort((a,b)=>b.total-a.total);
+      const area = card.querySelector('#statsTableArea');
+      if(!rows.length){ area.innerHTML = `<div class="empty-state">No completed rounds archived for ${year} yet.</div>`; return; }
+      area.innerHTML = `
+        <div class="grid-scroll"><table>
+          <thead><tr>
+            <th class="rowlabel">Player</th><th>Rnds</th><th>Nassau</th><th>Best Ball</th><th>Gold</th><th>9pt</th><th>Iggy</th><th>Junk</th><th>Total</th>
+          </tr></thead>
+          <tbody>${rows.map(r=>`
+            <tr>
+              <td class="rowlabel">${r.name}</td>
+              <td>${r.roundsPlayed}</td>
+              <td>${fmtMoney(r.nassau)}</td>
+              <td>${fmtMoney(r.bestBall)}</td>
+              <td>${fmtMoney(r.gold)}</td>
+              <td>${fmtMoney(r.ninePoint)}</td>
+              <td>${fmtMoney(r.iggarote)}</td>
+              <td>${fmtMoney(r.junk)}</td>
+              <td style="font-weight:700;">${fmtMoney(r.total)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table></div>
+      `;
+    }
+    renderTable(defaultYear);
+    card.querySelector('#statsYearSel').onchange = e => renderTable(Number(e.target.value));
+  }).catch(e=>{
+    card.innerHTML = `<div class="section-label">Season Stats</div><div class="empty-state">Couldn't load stats. Check your connection and try again.</div>`;
+  });
+
+  return wrap;
+}
+
 function renderPayout(){
   const wrap = el(`<div></div>`);
   const ap = activePlayers();
@@ -2413,22 +2546,17 @@ function renderPayout(){
     if(!ap.length){ tc.innerHTML = `<div class="empty-state">Add players on Setup to see payouts.</div>`; return; }
     const mpTotals = state.enableMatchPlay ? matchPlayPlayerTotals() : {};
     const bbTotals = (state.enableBestBall && ap.length>=4) ? bestBallPlayerTotals() : {};
-    const pog = (state.enablePotOfGold && ap.length>=2) ? computePotOfGold() : null;
     const npTotals = (state.enableNinePoint && ninePointParticipantsResolved().length===3) ? ninePointPlayerTotals() : {};
-    const npSettle = (state.enableNinePoint && ninePointParticipantsResolved().length===3) ? ninePointSettlement() : {};
-    const iggTotals = (state.enableIggarote && iggaroteParticipantsResolved().length>=2) ? iggarotePlayerTotals() : {};
-    const jkTotals = junkTotals();
+    const breakdown = computePlayerPayoutBreakdown();
+    const byNum = {};
+    breakdown.forEach(row=>{ byNum[row.num] = row; });
     tc.innerHTML = `<div class="section-label">Net Payout</div>`;
     ap.forEach(p=>{
       const mpU = mpTotals[p.num]||0;
       const bbU = bbTotals[p.num]||0;
-      const potD = pog ? (pog.netByPlayer[p.num]||0) : 0;
       const npPts = npTotals[p.num]||0;
-      const npD = state.enableNinePoint ? (npSettle[p.num]||0) : 0;
-      const iggD = state.enableIggarote ? (iggTotals[p.num]||0) : 0;
-      const jkD = jkTotals[p.num]||0;
-      const mpD = mpU*state.unitMatch, bbD = bbU*state.unitBB;
-      const totalD = mpD+bbD+potD+npD+iggD+jkD;
+      const row2 = byNum[p.num] || {nassau:0,bestBall:0,gold:0,ninePoint:0,iggarote:0,junk:0,total:0};
+      const potD = row2.gold, npD = row2.ninePoint, iggD = row2.iggarote, jkD = row2.junk, totalD = row2.total;
       const parts = [];
       parts.push(state.enableMatchPlay ? `Nassau ${mpU>0?'+':''}${mpU}u (F+B+18)` : `Nassau off`);
       parts.push(state.enableBestBall ? `Best Ball ${bbU>0?'+':''}${bbU}u` : `Best Ball off`);
@@ -2469,7 +2597,35 @@ function renderPayout(){
 /* ============================================================
    INIT
    ============================================================ */
-loadState();
+function tryStandaloneStatsMode(){
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('statscode');
+  const cfgB64 = params.get('statscfg');
+  if(!code || !cfgB64) return false;
+  let cfg;
+  try{ cfg = JSON.parse(atob(cfgB64)); }catch(e){ return false; }
+  try{
+    if(!window.firebase){ document.getElementById('main').innerHTML = `<div class="card empty-state">Stats library didn't load -- check your internet connection and reload.</div>`; return true; }
+    if(!firebase.apps || !firebase.apps.length){ firebase.initializeApp(cfg); }
+    const db = firebase.firestore();
+    const ref = db.collection('rounds').doc(code.trim().toUpperCase());
+    document.getElementById('tabbar').style.display = 'none';
+    document.querySelector('.title-row h1').textContent = 'Season Stats';
+    document.querySelector('header .sub').textContent = 'Stroke & Press · ' + code.trim().toUpperCase();
+    const chip = document.getElementById('courseChip');
+    if(chip) chip.style.display = 'none';
+    const main = document.getElementById('main');
+    main.innerHTML = '';
+    main.appendChild(renderStatsView(ref, false));
+  }catch(e){
+    document.getElementById('main').innerHTML = `<div class="card empty-state">Couldn't load stats -- the link may be broken.</div>`;
+  }
+  return true;
+}
+
+if(!tryStandaloneStatsMode()){
+  loadState();
+}
 </script>
 </body>
 </html>
